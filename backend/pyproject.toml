@@ -112,3 +112,15 @@ source_modules = [
 ]
 forbidden_modules = ["arada.api", "arada.cli", "fastapi", "starlette"]
 allow_indirect_imports = true
+
+# ---------------------------------------------------------------- coverage
+# SQLAlchemy's asyncio layer runs code inside greenlets; without greenlet
+# support coverage.py silently stops tracing after the first database call.
+[tool.coverage.run]
+source = ["arada"]
+concurrency = ["greenlet", "thread"]
+branch = true
+
+[tool.coverage.report]
+skip_covered = true
+show_missing = true
