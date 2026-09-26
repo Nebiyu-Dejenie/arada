@@ -17,6 +17,8 @@ from arada.kernel.logging import REDACTED, redact_processor
 from arada.kernel.tracing import new_span, parse_traceparent
 
 KEK = base64.b64encode(secrets.token_bytes(32)).decode()
+# Built at runtime so no token-shaped literal ever sits in the repository.
+FAKE_BOT_TOKEN = "123456789:" + secrets.token_urlsafe(26)[:35]
 DSN = "postgresql+asyncpg://u:p@localhost/db"
 
 
@@ -135,7 +137,7 @@ def test_redaction_removes_secret_keys_and_token_shaped_values() -> None:
         "event": "login with Bearer abcdefghijklmnopqrstuvwxyz0123",
         "password": "hunter2hunter2",
         "access_token": "tok",
-        "nested": {"api_key": "k", "note": "123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw1"},
+        "nested": {"api_key": "k", "note": FAKE_BOT_TOKEN},
         "dsn": "postgresql+asyncpg://arada_app:pw@db/arada",
         "hash": "$argon2id$v=19$m=65536,t=3,p=4$abc$def",
         "safe": "value",
@@ -145,7 +147,7 @@ def test_redaction_removes_secret_keys_and_token_shaped_values() -> None:
     for secret in (
         "hunter2hunter2",
         "abcdefghijklmnopqrstuvwxyz0123",
-        "AAHdqTcv",
+        FAKE_BOT_TOKEN,
         "$argon2id",
         ":pw@",
     ):
