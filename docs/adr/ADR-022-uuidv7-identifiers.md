@@ -19,3 +19,8 @@ Good index locality without exposing counts.
 
 ## Consequences
 —
+
+## History
+| Date | Change |
+|---|---|
+| 2026-09-26 | Implemented in Phase 1 (`kernel/ids.uuid7`, monotonic within a process). |

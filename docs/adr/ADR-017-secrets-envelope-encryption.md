@@ -19,3 +19,8 @@ Ciphertext cannot be swapped across tenants; key rotation is a re-wrap.
 
 ## Consequences
 Secret recovery depends on offline escrow of the key-encryption key.
+
+## History
+| Date | Change |
+|---|---|
+| 2026-09-26 | Implemented in Phase 1: `kernel/crypto.Keyring` (AES-256-GCM, per-record DEK, versioned KEK, AAD bound to table/row/tenant/purpose), used for TOTP secrets. The KEK comes from configuration; a KMS or Vault backend remains Planned. |

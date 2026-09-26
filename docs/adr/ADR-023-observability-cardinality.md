@@ -19,3 +19,8 @@ Bounded Prometheus cost with full per-tenant drill-down.
 
 ## Consequences
 A bounded top-N exporter for the busiest tenants and tenants with open incidents.
+
+## History
+| Date | Change |
+|---|---|
+| 2026-09-26 | Phase 1 implements the correlation foundation only: request_id, W3C trace context, tenant_id and user_id on every log line and audit event, plus structured JSON logs with redaction. Prometheus, Loki, Grafana and a trace backend are Deferred to the first real deployment (owner: do not overbuild monitoring before deployment). |

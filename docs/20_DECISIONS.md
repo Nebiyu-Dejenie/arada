@@ -17,9 +17,9 @@ This is the project's decision memory (Permanent Command §48). Each ADR lives i
 | ADR | Title | Status |
 |---|---|---|
 | [001](adr/ADR-001-modular-monolith.md) | Modular monolith with process roles | **Accepted** |
-| [002](adr/ADR-002-shared-postgres-rls.md) | Shared PostgreSQL, shared schema, RLS for the Starter tier | Proposed |
+| [002](adr/ADR-002-shared-postgres-rls.md) | Shared PostgreSQL, shared schema, RLS for the Starter tier | Proposed (implemented) |
 | [003](adr/ADR-003-data-planes.md) | Control / Commerce / Finance / Ops planes | Proposed |
-| [004](adr/ADR-004-backend-stack.md) | Backend: Python + FastAPI | Assumed |
+| [004](adr/ADR-004-backend-stack.md) | Backend: Python + FastAPI | Assumed (verified; recommended for Accepted) |
 | [005](adr/ADR-005-frontend-runtime.md) | Frontend: one TypeScript runtime, two bundles | Assumed |
 | [006](adr/ADR-006-blueprint-storage.md) | Blueprint storage: immutable versions, no per-blueprint DDL | Proposed |
 | [007](adr/ADR-007-jsonlogic-rules.md) | Rules in JSONLogic | Proposed |
@@ -40,10 +40,14 @@ This is the project's decision memory (Permanent Command §48). Each ADR lives i
 | [022](adr/ADR-022-uuidv7-identifiers.md) | UUIDv7 + per-tenant human references | Proposed |
 | [023](adr/ADR-023-observability-cardinality.md) | Tenant id in logs and traces, not metric labels | Proposed |
 | [024](adr/ADR-024-provider-agnostic-identity.md) | Provider-agnostic identity; customers per tenant | **Accepted** |
-| [025](adr/ADR-025-scoped-rbac.md) | Scoped RBAC, step-up, maker–checker | Proposed |
+| [025](adr/ADR-025-scoped-rbac.md) | Scoped RBAC, step-up, maker–checker | Proposed (implemented, partly Planned) |
 | [026](adr/ADR-026-root-domain-tbd.md) | `ROOT_DOMAIN` is configuration and TBD | **Accepted** |
 | [027](adr/ADR-027-phase-order.md) | Phase order per Permanent Command §55 | **Accepted** |
 | [028](adr/ADR-028-reference-vertical-phones.md) | Reference vertical: Phones | Assumed |
+| [029](adr/ADR-029-staff-authentication.md) | Staff authentication: opaque sessions, argon2id, TOTP | Proposed (implemented) |
+| [030](adr/ADR-030-hot-path-data-access.md) | Data access on per-request hot paths | **Proposed — awaiting owner review** |
+| [031](adr/ADR-031-feature-flag-precedence.md) | Feature flag precedence | Proposed (implemented) |
+| [032](adr/ADR-032-security-test-inventory.md) | Security tests enumerate OpenAPI and must be non-vacuous | **Accepted** |
 
 ## 2. Question register (Permanent Command §53)
 
@@ -63,7 +67,7 @@ This is the project's decision memory (Permanent Command §48). Each ADR lives i
 
 | # | Assumption | Where | Revisit by |
 |---|---|---|---|
-| A1 | Backend: Python 3.12+, FastAPI, SQLAlchemy Core/asyncpg, Alembic, aiogram 3 | ADR-004 | **Before Phase 1 code** (an override later is expensive) |
+| A1 | Backend: Python 3.12+, FastAPI, SQLAlchemy Core/asyncpg, Alembic, aiogram 3 | ADR-004 | **Verified in Phase 1**; convert to a decision at the Phase 1 review |
 | A2 | Frontend: React + TypeScript + Vite, two bundles | ADR-005 | Before Phase 2 UI work |
 | A3 | Reference vertical is Phones | ADR-028 | Before Phase 5 |
 | A4 | Settlement Model A (merchant-direct) until legal review | ADR-015 | Phase 4 |
@@ -82,10 +86,12 @@ This is the project's decision memory (Permanent Command §48). Each ADR lives i
 | U6 | Managed-bot limits and API coverage (bots per manager, Main Mini App configuration by API). This is a **verification task**, not an owner question. | Phase 2 (verify against docs plus a test bot before building on it) |
 | U7 | Object-storage product (licence and maintenance review) | Before first deployment |
 | U8 | SMS/email providers; AI model provider and data terms; courier partners | Phases 3 / 8 / 8 |
-| U9 | Whether this repository should stay public once code lands (recommended: private) | Before Phase 1 code is pushed |
+| U9 | Whether this repository should stay public now that code is in it (recommended: private) | Now (code is pushed; no secrets are in it) |
 
 ### BLOCKING
 
 | # | Item | Why |
 |---|---|---|
-| B1 | **Owner go-ahead to start Phase 1.** | Master Directive §101.19 requires architectural approval before implementation. Nothing else blocks Phase 1: it runs entirely on local Docker, with no domain, machines, payments or Telegram credentials. |
+| B1 | ~~Owner go-ahead to start Phase 1~~ | **Resolved 2026-09-26**: approved; Phase 1 implemented and awaiting review |
+| B2 | **Owner review of Phase 1** before Phase 2 starts | The owner asked to stop after Phase 1 for review |
+| B3 | Decision on ADR-030 (hot-path data access) | Proposed from Phase 1 performance evidence; affects Phase 2's first task |

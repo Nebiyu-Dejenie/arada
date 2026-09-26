@@ -65,5 +65,19 @@ Architecture, implementation, database, migration, authorization, tenant isolati
 ## Current status
 
 - Phase 0 (discovery and architecture) is complete.
-- Phase 1 (foundation) waits for the owner's go-ahead.
-- See `docs/15_ROADMAP.md`.
+- Phase 1 (platform kernel) is implemented and verified, and **awaits the owner's review**. Do not start Phase 2 without it.
+- What exists: `docs/21_IMPLEMENTATION_STATUS.md`. Open proposal: ADR-030.
+
+## Commands
+
+- Local stack: `./scripts/init-env.sh && docker compose up -d --build --wait`
+- Quality gates (in `backend/`): `uv run ruff check . ../scripts`, `uv run mypy`, `uv run lint-imports`, `uv run pytest -q`
+- Phase 1 from zero: `./scripts/phase1_demo.sh`
+- Runbook: `docs/runbooks/local-development.md`
+
+## Engineering rules learned in Phase 1
+
+- Security sweeps enumerate the OpenAPI document and assert exact coverage (ADR-032). Prove a new security suite fails against a sabotaged implementation before trusting it.
+- Every new tenant-scoped route must be added to `SAMPLE_BODIES` in `tests/security/test_tenant_isolation.py`, or CI fails.
+- Tenant-owned tables get FORCE RLS plus composite `(tenant_id, …)` foreign keys; cross-tenant lookups only through narrow SECURITY DEFINER resolvers.
+- Migrations are raw SQL, never import app code; frozen seed data lives in the migration; code mirrors are checked by tests.

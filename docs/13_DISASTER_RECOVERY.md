@@ -1,6 +1,6 @@
 # 13 — Disaster Recovery
 
-Status: **Proposed; the off-host backup destination is UNKNOWN (U3, blocking at the first deployment that holds real data)** · Phase 1 builds the tooling and local restore verification; off-host backups start with the first real deployment. A backup that has never been restored is not considered proven (Permanent Command §43).
+Status: **Proposed; the off-host backup destination is UNKNOWN (U3, blocking at the first deployment that holds real data)** · Backup tooling and restore verification are built with the first real deployment (Deferred from Phase 1; see `21_IMPLEMENTATION_STATUS.md`). A backup that has never been restored is not considered proven (Permanent Command §43).
 
 ## 1. Objectives
 

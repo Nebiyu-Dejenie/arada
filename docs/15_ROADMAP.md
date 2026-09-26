@@ -6,8 +6,8 @@ Status: **Accepted phase order** (ADR-027, Permanent Command §55) · Each phase
 
 | Phase | Name | Builds | Blocked by (from `20` §2) | Exit gate (summary) |
 |---|---|---|---|---|
-| **0** | Discovery | Architecture package, charter, ADRs, question register | — | Owner go-ahead (**B1**) ← *we are here* |
-| **1** | Foundation | Project structure, typed configuration, database foundation (schemas, roles, RLS, migrations, outbox/inbox), identity, tenancy, RBAC, audit, feature flags, **blueprint foundation**, merchant model; plus the enabling baseline: CI gates, local compose, observability, backup tooling | B1 (and A1 confirmed or not overridden) | ISO suite green; RLS policy lint; migration tests; blueprint publish/pin/immutability tests; an alert reaches the Ops channel locally; backup + restore verification on local compose |
+| **0** | Discovery | Architecture package, charter, ADRs, question register | — | Owner go-ahead (**B1**): done |
+| **1** | Foundation **(implemented; awaiting owner review)** | Project structure, typed configuration, database foundation (schemas, roles, RLS, migrations, outbox/inbox), identity, tenancy, RBAC, audit, feature flags, **blueprint foundation**, merchant model; plus the enabling baseline: CI gates, local compose, observability, backup tooling | B1 (and A1 confirmed or not overridden) | ISO suite green; RLS policy lint; migration tests; blueprint publish/pin/immutability tests; an alert reaches the Ops channel locally; backup + restore verification on local compose |
 | **2** | Telegram foundation | Bot integration (BYO token first; managed bots after U6 is verified), webhook multiplexer, Mini App `initData` authentication (HMAC + Ed25519), host-based tenant routing, deep links, notification foundation (Telegram channel, templates, rate limits) | U5, U6 | AUTH-1…5, ISO-4, ISO-8; webhook dedupe; per-bot rate limiting; Mini App shell renders a per-tenant manifest |
 | **3** | Commerce core | Catalog and listings (blueprint attributes, media pipeline), search (FTS + trigram + filters), customers, cart, checkout (server re-pricing, reservation), orders (core lifecycle + blueprint workflow), reviews (eligibility-gated), notifications for the order lifecycle | U7 (media storage), U8 (SMS/email, if used) | FIN-10 concurrent checkout; BP-3/4/5; ISO-9; review eligibility tests |
 | **4** | Payment + finance | Payment abstraction, provider adapters, payment intents, webhooks, poller, double-entry ledger, posting rules, commissions, refunds, reconciliation, payout architecture | **U4** | Full FIN-1…17 against provider sandboxes; trial balance 0; rebuild equals cache |
@@ -19,7 +19,17 @@ Status: **Accepted phase order** (ADR-027, Permanent Command §55) · Each phase
 
 Phases 1–4 are strictly sequential, because each depends on the previous phase's invariants. Phases 7 and 8 may overlap once Phase 6 passes.
 
-## Phase 1: Foundation task list (starts on B1)
+## Phase 1: as built (2026-09-26)
+
+Implemented and verified: see `21_IMPLEMENTATION_STATUS.md`. Against the original task list below, these items were **deferred on the owner's Phase 1 instructions** ("do not overbuild monitoring before deployment", "platform kernel only"):
+
+- Observability stack (Prometheus, Loki, Grafana): Deferred to the first deployment. The correlation and structured-logging foundation is implemented.
+- Backup tooling (pgBackRest, off-host): Deferred to the first deployment (needs U2 and U3).
+- Outbox and inbox: Planned for Phase 2, with its first consumer.
+- Frontend workspace skeleton: Planned for Phase 2.
+- Staff passkeys and step-up re-authentication: Planned (TOTP MFA is implemented).
+
+## Phase 1: original task list (for traceability)
 
 Every item meets the Definition of Done at foundation level: tests, typing, lint, migration check, security scan, tenant-isolation check, observability hooks and documentation.
 

@@ -14,9 +14,14 @@ PLATFORM → VERTICAL → BLUEPRINT (versioned) → MERCHANT TENANT → BOT + MI
 | Phase | State |
 |---|---|
 | 0: Discovery and architecture | **Complete** |
-| 1: Foundation | Waiting for the owner's go-ahead (see [question register](docs/20_DECISIONS.md#2-question-register-permanent-command-53)) |
+| 1: Platform kernel | **Implemented and verified; awaiting owner review** |
 
-No production code has been written yet, by design. The phase order is in [`docs/15_ROADMAP.md`](docs/15_ROADMAP.md).
+What exists, and what deliberately does not yet: [`docs/21_IMPLEMENTATION_STATUS.md`](docs/21_IMPLEMENTATION_STATUS.md). How to run it: [`docs/runbooks/local-development.md`](docs/runbooks/local-development.md). Phase order: [`docs/15_ROADMAP.md`](docs/15_ROADMAP.md).
+
+```bash
+./scripts/init-env.sh && docker compose up -d --build --wait   # local stack
+./scripts/phase1_demo.sh                                       # Phase 1 Definition of Done, from zero
+```
 
 ## Start here
 
@@ -25,7 +30,7 @@ No production code has been written yet, by design. The phase order is in [`docs
 | [`docs/charter/`](docs/charter/) | The owner's governing directives, verbatim, with precedence rules. **The Permanent Command governs.** |
 | [`CLAUDE.md`](CLAUDE.md) | Operating rules for engineering agents, condensed from the charter |
 | [`docs/20_DECISIONS.md`](docs/20_DECISIONS.md) | ADR index and the KNOWN / ASSUMED / UNKNOWN / BLOCKING register |
-| [`docs/adr/`](docs/adr/) | Architecture Decision Records (ADR-001…028) |
+| [`docs/adr/`](docs/adr/) | Architecture Decision Records (ADR-001…032) |
 
 ## Architecture documents
 
@@ -52,6 +57,7 @@ No production code has been written yet, by design. The phase order is in [`docs
 | 18 | [Event Model](docs/18_EVENT_MODEL.md) | Envelope, outbox, event catalogue |
 | 19 | [Acceptance Tests](docs/19_ACCEPTANCE_TESTS.md) | Success criteria; isolation, finance, edge and DR tests |
 | 20 | [Decisions](docs/20_DECISIONS.md) | ADR index and question register |
+| 21 | [Implementation Status](docs/21_IMPLEMENTATION_STATUS.md) | What is Implemented, Planned, Assumed or Deferred |
 
 ## Non-negotiables
 

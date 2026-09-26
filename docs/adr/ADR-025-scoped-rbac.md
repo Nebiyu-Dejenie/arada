@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Proposed — the principles are mandated by Permanent Command §10, §40 |
+| **Status** | Proposed — implemented in Phase 1 |
 | **Date** | 2026-09-26 |
 
 ## Decision
@@ -19,3 +19,8 @@ Expresses vertical and tenant boundaries precisely.
 
 ## Consequences
 A single-operator mode applies until a second platform admin exists.
+
+## History
+| Date | Change |
+|---|---|
+| 2026-09-26 | Implemented: the charter's roles and permissions, scoped assignments, live grants per request, MFA-gated privileged scopes, no-self-escalation (a grant cannot exceed the grantor's own permissions), no self-modification, last-owner and last-super-admin protection. Not seeded yet: CUSTOMER (implicit, Phase 2), DELIVERY_AGENT and SERVICE_PROVIDER (need assignment-level policies, Phases 3/8), PLATFORM_OPS (not in the charter's list). Planned: step-up re-authentication, maker-checker, just-in-time support grants. |

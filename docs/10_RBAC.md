@@ -2,6 +2,8 @@
 
 Status: **Proposed** · Related: ADR-025 · Phase 1
 
+> **As built in Phase 1 (2026-09-26):** the catalogue uses the charter's permission names (`products.*`, `payments.capture`, `finance.payout`, `users.*`, `staff.*`, `blueprints.*`, `tenants.*`, …). The seeded system roles are the charter's eleven. `PLATFORM_OPS`, `DELIVERY_AGENT`, `SERVICE_PROVIDER` and `CUSTOMER` are **not seeded yet** (ADR-025 history). Implemented: scoped grants, MFA-gated privileged scopes, the subset rule, no self-modification, last-owner and last-super-admin protection. Step-up re-authentication, maker–checker, just-in-time support grants and single-operator mode are **Planned**.
+
 ## 1. Model: scoped roles
 
 ```

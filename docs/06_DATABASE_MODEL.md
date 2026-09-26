@@ -2,6 +2,8 @@
 
 Status: **Proposed** · Related: ADR-002, ADR-003, ADR-013, ADR-022 · Engine: PostgreSQL 17+
 
+> **As built in Phase 1 (2026-09-26):** a single schema, `control`, with 7 migrations. Tenant-owned rows under FORCE RLS: `merchant_profiles`, `tenant_memberships`, `tenant_membership_roles`, `tenant_invitations`, `tenant_invitation_roles` and `audit_events`. Memberships live in the control plane, not `commerce` (ADR-003 history). The runtime roles are those in §2 plus **`arada_resolver`** (NOLOGIN; owns the two cross-tenant resolver functions). Verticals use `name_en`/`name_am` columns rather than JSON. The `commerce`, `finance` and `ops` schemas are created with their first tables. The rest of this document is the target model.
+
 ## 1. Conventions (all tables)
 
 | Rule | Detail |

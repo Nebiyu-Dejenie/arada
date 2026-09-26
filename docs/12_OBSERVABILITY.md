@@ -1,8 +1,10 @@
 # 12 — Observability
 
-Status: **Proposed** · Related: ADR-023 · Phase 1 (stack), then grows per phase
+Status: **Proposed** · Related: ADR-023 · Correlation foundation in Phase 1; stack with the first deployment
 
-The observability stack ships in **Phase 1**. The previous platform had alert rules and no production evaluator (`00` §6.4), and that must not repeat.
+> **As built in Phase 1 (2026-09-26):** correlation (request_id, W3C trace context, tenant_id, user_id) on every log line, response header and audit event; structured JSON logs with secret redaction. The Prometheus, Loki, Grafana and trace backends are **Deferred to the first deployment** (owner instruction), so the alert and SLO sections below are the target, not the current state.
+
+The observability stack ships **with the first real deployment, before any production traffic**, and a test alert must reach the Ops channel end to end. Alert rules with no evaluator (`00` §6.4) must never happen.
 
 ## 1. Correlation fields (directive §52)
 
