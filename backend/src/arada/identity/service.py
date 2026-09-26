@@ -21,8 +21,15 @@ from arada.kernel.config import Settings
 from arada.kernel.context import Principal, RequestMeta
 from arada.kernel.crypto import Keyring
 from arada.kernel.db import Database
-from arada.kernel.errors import Conflict, MfaRequired, Unauthenticated, ValidationFailed
+from arada.kernel.errors import (
+    Conflict,
+    MfaRequired,
+    NotFound,
+    Unauthenticated,
+    ValidationFailed,
+)
 from arada.kernel.ids import uuid7
+from arada.kernel.scope import Scope
 
 INVALID_CREDENTIALS = "invalid credentials"
 
@@ -315,3 +322,19 @@ async def confirm_totp(
             )
     if not ok:
         raise ValidationFailed(errors={"code": ["invalid or expired code"]})
+
+
+async def find_by_username(scope: Scope, username: str) -> PersonSummary:
+    """Platform lookup of a person by username (``users.read``)."""
+    scope.require("users.read")
+    uname = passwords.normalise_username(username)
+    person_id: UUID | None = (
+        await scope.conn.execute(
+            select(identities.c.person_id).where(
+                and_(identities.c.provider == "password", identities.c.subject == uname)
+            )
+        )
+    ).scalar_one_or_none()
+    if person_id is None:
+        raise NotFound("person not found")
+    return await summary(scope.conn, person_id)

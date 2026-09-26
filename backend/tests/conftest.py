@@ -27,6 +27,8 @@ from arada.kernel.config import Environment, Settings
 from arada.kernel.db import Database
 from arada.main import create_app
 from arada.ops.db_bootstrap import RolePasswords, bootstrap_roles
+from arada.rbac.bootstrap import bootstrap_super_admin
+from tests.support import DEFAULT_PASSWORD, Persona, enrol_totp, login, unique
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -181,3 +183,14 @@ async def app_conn(pg_env: PgEnv, test_database: str) -> AsyncIterator[asyncpg.C
     )
     yield conn
     await conn.close()
+
+
+@pytest.fixture(scope="session")
+async def super_admin(settings: Settings, client: httpx.AsyncClient) -> Persona:
+    """The platform owner, bootstrapped exactly as the CLI does, with TOTP."""
+    username = unique("root")
+    person_id = await bootstrap_super_admin(settings, username, "Platform Owner", DEFAULT_PASSWORD)
+    persona = Persona(person_id=person_id, username=username, password=DEFAULT_PASSWORD)
+    await login(client, persona)
+    await enrol_totp(client, persona)
+    return persona

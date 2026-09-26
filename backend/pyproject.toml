@@ -106,6 +106,6 @@ forbidden_modules = ["arada.api", "arada.cli", "arada.ops"]
 [[tool.importlinter.contracts]]
 name = "Domain modules never import the HTTP layer, CLI or web framework"
 type = "forbidden"
-source_modules = ["arada.audit", "arada.identity"]
+source_modules = ["arada.audit", "arada.identity", "arada.rbac", "arada.verticals", "arada.access"]
 forbidden_modules = ["arada.api", "arada.cli", "fastapi", "starlette"]
 allow_indirect_imports = true

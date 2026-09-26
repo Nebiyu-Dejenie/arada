@@ -1,16 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Request, Response
 from pydantic import Field
 
 from arada.api.auth import CurrentPrincipal
-from arada.api.deps import container_of, request_meta
+from arada.api.deps import Meta, container_of
 from arada.api.schemas import RequestModel, ResponseModel
 from arada.identity import service as identity
-from arada.kernel.context import RequestMeta
 
 router = APIRouter(prefix="/v1", tags=["authentication"])
 
@@ -35,9 +33,6 @@ class TotpEnrolmentOut(ResponseModel):
 
 class TotpConfirmIn(RequestModel):
     code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
-
-
-Meta = Annotated[RequestMeta, Depends(request_meta)]
 
 
 @router.post("/auth/login", response_model=SessionOut, summary="Password (+TOTP) login")

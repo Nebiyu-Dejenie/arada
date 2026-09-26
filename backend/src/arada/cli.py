@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import getpass
 import os
 import sys
 from pathlib import Path
@@ -75,6 +76,18 @@ def cmd_config_check(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_bootstrap_superadmin(args: argparse.Namespace) -> int:
+    from arada.rbac.bootstrap import bootstrap_super_admin
+
+    password = os.environ.get("ARADA_BOOTSTRAP_PASSWORD") or getpass.getpass("Password: ")
+    person_id = asyncio.run(
+        bootstrap_super_admin(get_settings(), args.username, args.display_name, password)
+    )
+    print(f"super admin created: person_id={person_id}")
+    print("next: log in, enrol TOTP (POST /v1/me/mfa/totp), then log in again with a code")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="arada", description="ARADA platform operations")
     sub = parser.add_subparsers(dest="group", required=True)
@@ -93,6 +106,11 @@ def build_parser() -> argparse.ArgumentParser:
     cfg = sub.add_parser("config", help="configuration").add_subparsers(dest="cmd", required=True)
     cfg.add_parser("check", help="validate configuration").set_defaults(func=cmd_config_check)
 
+    admin = sub.add_parser("admin", help="administration").add_subparsers(dest="cmd", required=True)
+    boot = admin.add_parser("bootstrap-superadmin", help="create the first SUPER_ADMIN (once)")
+    boot.add_argument("--username", required=True)
+    boot.add_argument("--display-name", required=True)
+    boot.set_defaults(func=cmd_bootstrap_superadmin)
     return parser
 
 
