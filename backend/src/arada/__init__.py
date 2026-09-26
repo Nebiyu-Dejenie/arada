@@ -1,0 +1,1 @@
+"""ARADA platform kernel."""

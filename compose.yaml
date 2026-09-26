@@ -1,0 +1,84 @@
+# ARADA local development stack (Phase 1).
+#
+# DEVELOPMENT ONLY. Ports are published on 127.0.0.1 so tests on the host can
+# reach them. A production compose file will publish no ports at all:
+# ingress is only through Cloudflare Tunnel (05_DOMAIN_AND_TUNNEL.md §9).
+#
+# First run:  ./scripts/init-env.sh && docker compose up -d --build
+# Secrets come from .env (generated, gitignored). Nothing secret is in git.
+name: arada-dev
+
+x-db-passwords: &db-passwords
+  ARADA_DB_OWNER_PASSWORD: ${ARADA_DB_OWNER_PASSWORD:?run scripts/init-env.sh first}
+  ARADA_DB_APP_PASSWORD: ${ARADA_DB_APP_PASSWORD:?run scripts/init-env.sh first}
+  ARADA_DB_READER_PASSWORD: ${ARADA_DB_READER_PASSWORD:?run scripts/init-env.sh first}
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: arada-dev-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${ARADA_PG_SUPERUSER_PASSWORD:?run scripts/init-env.sh first}
+      POSTGRES_DB: arada
+    ports:
+      - "127.0.0.1:${ARADA_PG_PORT:-55432}:5432"
+    volumes:
+      - arada_dev_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d arada"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    networks: [data]
+
+  db-bootstrap:
+    build: ./backend
+    image: arada-platform:dev
+    command: ["arada", "db", "bootstrap-roles"]
+    environment:
+      <<: *db-passwords
+      ARADA_DB_SUPERUSER_URL: postgresql://postgres:${ARADA_PG_SUPERUSER_PASSWORD}@postgres:5432/arada
+      ARADA_DB_NAME: arada
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
+    networks: [data]
+
+  migrate:
+    image: arada-platform:dev
+    pull_policy: never
+    command: ["arada", "db", "upgrade"]
+    environment:
+      ARADA_DATABASE_OWNER_URL: postgresql+asyncpg://arada_owner:${ARADA_DB_OWNER_PASSWORD}@postgres:5432/arada
+    depends_on:
+      db-bootstrap: { condition: service_completed_successfully }
+    restart: "no"
+    networks: [data]
+
+  api:
+    image: arada-platform:dev
+    pull_policy: never
+    container_name: arada-dev-api
+    environment:
+      ARADA_ENVIRONMENT: development
+      ARADA_LOG_FORMAT: json
+      ARADA_DATABASE_URL: postgresql+asyncpg://arada_app:${ARADA_DB_APP_PASSWORD}@postgres:5432/arada
+      ARADA_DATABASE_PLATFORM_READER_URL: postgresql+asyncpg://arada_platform_reader:${ARADA_DB_READER_PASSWORD}@postgres:5432/arada
+      ARADA_KEK_BASE64: ${ARADA_KEK_BASE64:?run scripts/init-env.sh first}
+    ports:
+      - "127.0.0.1:${ARADA_API_PORT:-58000}:8000"
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    restart: unless-stopped
+    networks: [app, data]
+
+volumes:
+  arada_dev_pg:
+
+networks:
+  app:
+    name: arada-dev-app
+  data:
+    name: arada-dev-data
