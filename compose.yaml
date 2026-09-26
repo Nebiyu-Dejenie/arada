@@ -6,7 +6,7 @@
 #
 # First run:  ./scripts/init-env.sh && docker compose up -d --build
 # Secrets come from .env (generated, gitignored). Nothing secret is in git.
-name: arada-dev
+name: ${COMPOSE_PROJECT_NAME:-arada-dev}
 
 x-db-passwords: &db-passwords
   ARADA_DB_OWNER_PASSWORD: ${ARADA_DB_OWNER_PASSWORD:?run scripts/init-env.sh first}
@@ -16,7 +16,6 @@ x-db-passwords: &db-passwords
 services:
   postgres:
     image: postgres:17-alpine
-    container_name: arada-dev-postgres
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${ARADA_PG_SUPERUSER_PASSWORD:?run scripts/init-env.sh first}
@@ -35,7 +34,7 @@ services:
 
   db-bootstrap:
     build: ./backend
-    image: arada-platform:dev
+    image: ${ARADA_IMAGE:-arada-platform:dev}
     command: ["arada", "db", "bootstrap-roles"]
     environment:
       <<: *db-passwords
@@ -47,7 +46,7 @@ services:
     networks: [data]
 
   migrate:
-    image: arada-platform:dev
+    image: ${ARADA_IMAGE:-arada-platform:dev}
     pull_policy: never
     command: ["arada", "db", "upgrade"]
     environment:
@@ -58,9 +57,8 @@ services:
     networks: [data]
 
   api:
-    image: arada-platform:dev
+    image: ${ARADA_IMAGE:-arada-platform:dev}
     pull_policy: never
-    container_name: arada-dev-api
     environment:
       ARADA_ENVIRONMENT: development
       ARADA_LOG_FORMAT: json
@@ -71,14 +69,19 @@ services:
       - "127.0.0.1:${ARADA_API_PORT:-58000}:8000"
     depends_on:
       migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=2).status == 200 else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     restart: unless-stopped
     networks: [app, data]
 
 volumes:
   arada_dev_pg:
 
+# Names are namespaced by the compose project (-p), so several isolated stacks
+# (dev, a fresh demo, CI) can run side by side without sharing anything.
 networks:
   app:
-    name: arada-dev-app
   data:
-    name: arada-dev-data
