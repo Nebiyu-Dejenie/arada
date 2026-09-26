@@ -1,96 +1,91 @@
-# 20 — Architecture Decision Records and Open Questions
+# 20 — Decisions and Question Register
 
-Status legend: **Proposed** (awaiting owner approval) · **Accepted** · **Blocked** (needs an answer to a question in §2) · **Superseded**
+This is the project's decision memory (Permanent Command §48). Each ADR lives in its own file in [`adr/`](adr/) with these fields: Decision, Context, Alternatives, Reason, Consequences, Date, Status. **An accepted ADR is never edited in place.** A change gets a new ADR that supersedes it.
 
-Every major decision is recorded here (directive §95). A change to an accepted decision gets a new ADR that supersedes the old one; ADRs are never edited in place after acceptance.
+**Status meanings:**
 
-## 1. Decision records
+| Status | Meaning |
+|---|---|
+| Accepted | Mandated by the charter or approved by the owner |
+| Proposed | Architect's recommendation, awaiting owner approval |
+| Assumed | A documented assumption under §53; work proceeds unless the owner objects |
+| Deferred | Intentionally decided later, at the phase named |
+| Superseded | Replaced by a later ADR |
 
-| ADR | Decision | Reason | Alternatives rejected (for now) | Revisit when | Status |
-|---|---|---|---|---|---|
-| **001** | **Modular monolith**, one image, process roles `api`/`worker`/`scheduler`/`migrate` | Lowest operational cost; module boundaries enforced by import contracts; extraction stays possible | Microservices from day one: operational load without a measured need (directive §97) | A module needs independent scaling or isolation, measured | Proposed |
-| **002** | **Shared PostgreSQL, shared schema, RLS** for the Starter tier | Cost per merchant; one migration path; RLS gives database-enforced isolation | Database per tenant by default: cost and operations at 1,000+ tenants. Schema per tenant: migration multiplication with no real isolation gain. | — | Proposed |
-| **003** | **Control / Commerce / Finance / Ops planes**, no cross-plane joins; placement table for Pro/Enterprise | Makes isolation tiers a placement change; keeps money in one database | One undifferentiated schema: blocks enterprise placement later | — | Proposed |
-| **004** | Backend: **Python 3.13+, FastAPI, Pydantic v2, SQLAlchemy 2 Core over asyncpg, Alembic, aiogram 3** | Strongest production evidence in this environment (ledger, Telegram auth, adapters, ops tooling already proven in the live game stack); async I/O suits webhook-heavy load | Spring Boot (AradaGebeya prototype: single-tenant, less proven here); Go/NestJS (no in-house evidence) | Profiling shows a CPU-bound hotspot (then extract that module in a faster runtime) | **Blocked on Q6** |
-| **005** | Frontend: **one TypeScript runtime, two bundles** (customer, console), React + Vite + pnpm workspaces; SDK generated from OpenAPI | One codebase for every merchant (directive §9, §81); a small customer bundle for the Telegram WebView | Per-vertical or per-merchant apps (forbidden); Next.js SSR (unnecessary server runtime for a manifest-driven SPA) | SEO needs require SSR for storefronts: add pre-rendering for public listing pages | **Blocked on Q6** |
-| **006** | Blueprints as **immutable versioned JSON documents**; core tables + `jsonb` attributes + a **typed attribute projection**; **no per-blueprint DDL** | Safe dynamic fields; indexed range filters; no runtime schema changes | Per-vertical tables (DDL at runtime, migration explosion); pure EAV (slow joins) | Filter performance degrades: OpenSearch via `SearchPort` | Proposed |
-| **007** | Rules in **JSONLogic** (same evaluator semantics in Python and TypeScript) | Sandboxed, serialisable, diffable, portable | Embedded scripting (Lua/JS): an arbitrary-code risk. CEL: weaker JS ecosystem parity today | Rule needs outgrow JSONLogic | Proposed |
-| **008** | Hostnames: **Option B**: `{slug}.DOMAIN` per merchant + shared `merchant.`, `admin.`, `finance.`, `ops.`, `api.` hosts | 1 DNS record per merchant; one admin attack surface; clean cookie isolation (`05` §2) | Option A (`admin-{slug}`, `finance-{slug}`): 3× records, thousands of admin hostnames | — | **Blocked on Q3** |
-| **009** | DNS **explicit mode** (one proxied CNAME per merchant via API) + tunnel **wildcard ingress**; wildcard DNS as the scale fallback | Unknown hosts never reach the origin; auditable; no tunnel restarts per merchant | Manual records (forbidden); per-merchant tunnel routes | Record usage > 80% of the zone limit | Proposed |
-| **010** | Ingress **Cloudflare → cloudflared (container) → Traefik v3** with **all routing in git**; default 404; no published ports | Directive §15, §19; fixes the "routers outside git" failure seen previously | Host-level cloudflared + untracked Traefik (proven fragile); cloudflared → services directly (no central middleware) | — | Proposed |
-| **011** | Telegram: **Factory bot + managed bots** (Bot API 9.6) per merchant; BYO-token fallback; one multiplexed webhook endpoint | Automated per-merchant bots with API token rotation; no token pasting | Only BYO tokens (manual, merchant knows the token); one shared bot for all merchants (breaks merchant identity) | — | **Blocked on Q7** (ownership) |
-| **012** | Mini App auth = **HMAC + Ed25519 `signature` + bot binding + freshness** → short-lived tenant-bound tokens | Blocks `initData` forgery by token holders; ties sessions to the merchant | HMAC only (forgeable by anyone with the token) | Telegram changes the scheme | Proposed |
-| **013** | Money as **`bigint` minor units + ISO currency**; rates in **basis points**; largest-remainder allocation | Exactness; no floats (directive §27) | `NUMERIC` decimals (exact, but mixes scales and invites float conversion at edges) | Multi-currency with 3-decimal currencies: handled by the per-currency exponent table | Proposed |
-| **014** | **Double-entry ledger** in the finance plane, append-only, zero-sum enforced by a deferred DB trigger, nightly rebuild compare | Financial integrity is priority #3; proven pattern | Balances on order rows (directive §96) | — | Proposed |
-| **015** | Settlement **Model A (direct)** by default, **B (split)** once contracted, **C (platform collect)** only with written legal clearance | NBE legal framework must be confirmed before holding funds (directive §29) | Platform collect by default (regulatory risk) | Counsel's opinion + provider contracts (Q8) | **Blocked on Q8** |
-| **016** | **Transactional outbox in Postgres** + inbox dedupe; no message broker initially | Atomicity with no extra infrastructure; at-least-once delivery + idempotent consumers | RabbitMQ/Kafka/NATS from day one (another stateful system to operate) | Dispatcher lag or outbox contention is measured | Proposed |
-| **017** | Secrets: **envelope encryption (AES-256-GCM, AAD-bound)**, KEK outside the DB; infrastructure secrets in a **private ops repo** (SOPS/age or Ansible Vault) | This repository is public; ciphertext can't be moved across tenants | Plaintext env vars for per-merchant secrets (don't scale, leak easily); Vault on day one (operational load) | More than 1 operator or compliance needs: OpenBao/Vault transit behind the same interface | Proposed |
-| **018** | Search: **Postgres full-text + attribute projection** behind `SearchPort` | Enough for launch; no extra cluster | OpenSearch on day one (memory-hungry, another cluster to operate) | Search p95 > 300 ms, or relevance or Amharic stemming needs | Proposed |
-| **019** | Object storage via the **S3 API only**; server product chosen after a licence and maintenance review (MinIO community distribution changed in 2025; evaluate MinIO, Garage, SeaweedFS) | Keeps the backend swappable | Coupling code to one product | — | Proposed (product pending) |
-| **020** | **Docker Compose + Ansible + Terraform (Cloudflare)**; no Kubernetes until the triggers in `11` §9 are met | Directive §20; the smallest operational surface | Kubernetes now | Triggers met | Proposed |
-| **021** | The Commerce OS is **fully separate** from the gaming products: separate repo, database, tunnel, credentials and deployment. Patterns are ported, not shared at runtime. | Blast-radius isolation; different regulatory profiles; avoids repeating the shared-network incident | Extending the gaming codebase | — | **Blocked on Q9** |
-| **022** | IDs: **UUIDv7** generated in the application; human `ref`s per tenant | Index locality; no DB-version dependency; non-enumerable | Serial ids (enumerable, leak volume); UUIDv4 (poor locality) | — | Proposed |
-| **023** | Observability: OTel → Prometheus / Loki / Tempo / Grafana; **`tenant_id` in logs and traces, not as a Prometheus label**; tenant health in Postgres | Bounded metric cardinality at thousands of tenants | Per-tenant Prometheus labels | — | Proposed |
-| **024** | Identity: global **person + provider identities**; **customer per tenant** | Telegram is the first provider, not the only one (directive §59) | Users keyed by Telegram id (current game stack) | — | Proposed |
-| **025** | **Scoped RBAC** (platform/vertical/tenant) + policy checks + step-up + maker–checker + JIT support grants; single-operator mode until a second admin exists | Directive §32–35, §54; practical for a solo owner | Global roles (cannot express vertical or tenant scope) | — | Proposed |
+## 1. ADR index
 
-## 2. Blocking questions for the owner
+| ADR | Title | Status |
+|---|---|---|
+| [001](adr/ADR-001-modular-monolith.md) | Modular monolith with process roles | **Accepted** |
+| [002](adr/ADR-002-shared-postgres-rls.md) | Shared PostgreSQL, shared schema, RLS for the Starter tier | Proposed |
+| [003](adr/ADR-003-data-planes.md) | Control / Commerce / Finance / Ops planes | Proposed |
+| [004](adr/ADR-004-backend-stack.md) | Backend: Python + FastAPI | Assumed |
+| [005](adr/ADR-005-frontend-runtime.md) | Frontend: one TypeScript runtime, two bundles | Assumed |
+| [006](adr/ADR-006-blueprint-storage.md) | Blueprint storage: immutable versions, no per-blueprint DDL | Proposed |
+| [007](adr/ADR-007-jsonlogic-rules.md) | Rules in JSONLogic | Proposed |
+| [008](adr/ADR-008-hostname-convention.md) | Hostname naming convention | Deferred (domain phase) |
+| [009](adr/ADR-009-dns-provisioning-mode.md) | DNS provisioning mode | Deferred (domain phase) |
+| [010](adr/ADR-010-ingress-tunnel-traefik.md) | Ingress: Cloudflare Tunnel → Traefik, routing in git | Proposed |
+| [011](adr/ADR-011-telegram-managed-bots.md) | Telegram managed bots + BYO fallback | Proposed (verify limits before Phase 2) |
+| [012](adr/ADR-012-miniapp-authentication.md) | Mini App auth: HMAC + Ed25519 + bot binding | Proposed |
+| [013](adr/ADR-013-money-minor-units.md) | Money as integer minor units | **Accepted** |
+| [014](adr/ADR-014-double-entry-ledger.md) | Double-entry append-only ledger | **Accepted** |
+| [015](adr/ADR-015-settlement-model.md) | Settlement defaults to merchant-direct | **Accepted** (default); final model at Phase 4 |
+| [016](adr/ADR-016-transactional-outbox.md) | Transactional outbox, no broker | **Accepted** |
+| [017](adr/ADR-017-secrets-envelope-encryption.md) | Envelope encryption; infrastructure secrets outside the repo | Proposed |
+| [018](adr/ADR-018-postgres-search.md) | PostgreSQL search: FTS + trigram + filters | **Accepted** |
+| [019](adr/ADR-019-object-storage.md) | Object storage behind the S3 API | Proposed (product pending) |
+| [020](adr/ADR-020-compose-no-kubernetes.md) | Compose + Ansible, no Kubernetes yet | **Accepted** |
+| [021](adr/ADR-021-separation-from-other-projects.md) | Separate from unrelated local projects | **Accepted** |
+| [022](adr/ADR-022-uuidv7-identifiers.md) | UUIDv7 + per-tenant human references | Proposed |
+| [023](adr/ADR-023-observability-cardinality.md) | Tenant id in logs and traces, not metric labels | Proposed |
+| [024](adr/ADR-024-provider-agnostic-identity.md) | Provider-agnostic identity; customers per tenant | **Accepted** |
+| [025](adr/ADR-025-scoped-rbac.md) | Scoped RBAC, step-up, maker–checker | Proposed |
+| [026](adr/ADR-026-root-domain-tbd.md) | `ROOT_DOMAIN` is configuration and TBD | **Accepted** |
+| [027](adr/ADR-027-phase-order.md) | Phase order per Permanent Command §55 | **Accepted** |
+| [028](adr/ADR-028-reference-vertical-phones.md) | Reference vertical: Phones | Assumed |
 
-Only questions that change the architecture are listed. Everything discoverable was discovered (`00_DISCOVERY.md`). Each question notes what it blocks.
+## 2. Question register (Permanent Command §53)
 
-### A. Domain and edge (blocks Phases 3–4 and any public deployment; does **not** block Phase 1 code)
+### KNOWN
 
-**Q1. Which single root domain does the Commerce OS use?**
-Both `arada.fun` (registrar Hostinger) and `arada.click` currently run live **real-money gaming** products and already use `admin.`, `finance.`, `payments.` and `agent.`. Options:
+| # | Fact | Source |
+|---|---|---|
+| K1 | `ROOT_DOMAIN` is TBD. `arada.fun` and `arada.click` are unrelated and must not be used. | Owner, Permanent Command §26, §51 |
+| K2 | ARADA is separate from all other local projects: no shared code, runtime, infrastructure, credentials or domain. | Owner (ADR-021) |
+| K3 | The first deployment is self-hosted VMs with Docker Compose. Ingress is only through one project Cloudflare Tunnel. No Kubernetes, no premature brokers or search clusters. | Permanent Command §18, §19, §25, §26 |
+| K4 | Repository: `github.com/Nebiyu-Dejenie/arada`, **public**. | Observed |
+| K5 | Development workstation: Ubuntu 24.04 (WSL2), Docker 29 + Compose v2.29, Python 3.12, Node 22, Ansible, Terraform, `gh`, `cloudflared`. This is development only and says nothing about production capacity. | Observed |
+| K6 | Telegram Bot API documents managed bots (`KeyboardButtonRequestManagedBot`, `getManagedBotToken`, `replaceManagedBotToken`, `setManagedBotAccessSettings`), which need management enabled in @BotFather and a user action to create each bot. Main Mini App and direct-link apps are configured in @BotFather. | Official Bot API docs, checked 2026-09-26 |
+| K7 | Mini App `initData` validation: HMAC-SHA256 with the `WebAppData` key derivation, plus an Ed25519 `signature` verifiable with Telegram's published public keys. | Official Mini Apps docs, checked 2026-09-26 |
 
-- (a) `arada.fun` for the Commerce OS, and move the Bingo product elsewhere
-- (b) `arada.click`, with the same trade-off
-- (c) keep gaming and commerce on different domains; this is an exception to the one-domain rule and needs your explicit approval
+### ASSUMED (documented; work proceeds unless the owner objects)
 
-Recommendation: do **not** co-host the commerce platform and gambling on one domain. Payment providers, Telegram policy and brand trust treat them differently. Please also confirm which Cloudflare account holds the chosen zone; the tunnel must be in the same account.
+| # | Assumption | Where | Revisit by |
+|---|---|---|---|
+| A1 | Backend: Python 3.12+, FastAPI, SQLAlchemy Core/asyncpg, Alembic, aiogram 3 | ADR-004 | **Before Phase 1 code** (an override later is expensive) |
+| A2 | Frontend: React + TypeScript + Vite, two bundles | ADR-005 | Before Phase 2 UI work |
+| A3 | Reference vertical is Phones | ADR-028 | Before Phase 5 |
+| A4 | Settlement Model A (merchant-direct) until legal review | ADR-015 | Phase 4 |
+| A5 | Currency ETB (minor-unit exponent 2); locales Amharic + English; time zone `Africa/Addis_Ababa`; Ethiopian calendar as a display option only | `06` | Phase 1 |
+| A6 | Local development uses `*.localhost` hostnames. No public environment exists until the domain is supplied. | ADR-026 | Domain phase |
 
-**Q2. Cloudflare API access:** will you create a **zone-scoped API token** (DNS edit for that zone; tunnel read) for the provisioning service when Phase 3 starts? It is stored encrypted and never committed.
+### UNKNOWN (not blocking yet; asked only when the named phase needs it)
 
-**Q3. Approve hostname Option B** (`{slug}.DOMAIN` + shared `merchant.`/`admin.`/`finance.` consoles) over Option A (`admin-{slug}`, `finance-{slug}`). See `05` §2.
+| # | Unknown | Becomes blocking at |
+|---|---|---|
+| U1 | `ROOT_DOMAIN`, its Cloudflare account, and a zone-scoped API token | The first public deployment (staging), or Phase 6 domain provisioning, whichever comes first |
+| U2 | Production and staging machines: CPU, RAM, disk, network, VM topology, OS | The first staging or production deployment |
+| U3 | Off-host backup destination | The first deployment that holds real data |
+| U4 | Payment providers with signed agreements; split or sub-account support; legal opinion on holding funds | Phase 4 |
+| U5 | Merchant bot ownership: the merchant's own Telegram account (managed bot) or a platform account | Phase 2 |
+| U6 | Managed-bot limits and API coverage (bots per manager, Main Mini App configuration by API). This is a **verification task**, not an owner question. | Phase 2 (verify against docs plus a test bot before building on it) |
+| U7 | Object-storage product (licence and maintenance review) | Before first deployment |
+| U8 | SMS/email providers; AI model provider and data terms; courier partners | Phases 3 / 8 / 8 |
+| U9 | Whether this repository should stay public once code lands (recommended: private) | Before Phase 1 code is pushed |
 
-### B. Infrastructure (blocks Phase 1 staging and production)
+### BLOCKING
 
-**Q4. Which machines?** The existing Proxmox host (which had an outage on 2026-09-23), the planned new server, or new VMs? For each: vCPU, RAM, disk (SSD?), and whether it has a public IP. With a public IP, all inbound traffic is firewalled and only the tunnel is used. Minimum for launch: 2 VMs (`11` §3).
-
-**Q5. Off-site backup destination:** a second physical site or NAS you control, or an encrypted S3-compatible bucket from a third-party provider? It must be in a different failure domain from the database host.
-
-### C. Technology (blocks Phase 1 code)
-
-**Q6. Approve the stack:** Python/FastAPI backend (ADR-004) + React/TypeScript/Vite frontend (ADR-005), porting proven patterns from the game stack, rather than Spring Boot/Next.js from the AradaGebeya prototype.
-
-### D. Telegram (blocks Phase 4)
-
-**Q7. Who owns each merchant's bot?**
-
-- (a) The **merchant owner's** Telegram account, as a managed bot controlled by our Factory bot (recommended: the merchant truly owns their identity, and we can still rotate tokens and configure it).
-- (b) A **platform-owned** Telegram account, so the merchant depends on the platform.
-
-Also: create a new Factory bot for the platform (recommended), or reuse an existing one?
-
-### E. Payments and legal (blocks Phases 7–8)
-
-**Q8.**
-
-- Which payment providers do you have **signed merchant or API agreements** with today (Telebirr merchant API, Chapa, SantimPay, ArifPay, CBE Birr, M-PESA)?
-- Do any support **split settlement or sub-accounts**?
-- Has counsel reviewed whether the platform may **collect and hold** merchant funds under the NBE framework?
-
-Until answered, the design defaults to Model A (merchant-direct).
-
-### F. Relationship to existing systems (blocks the repo and infrastructure setup in Phase 1)
-
-**Q9. Confirm that the Commerce OS is a separate system from the gaming products** (ADR-021): its own database, tunnel, credentials and deployment, reusing *patterns* but not runtime. Also confirm whether this repository should stay **public**: it will contain architecture and code but never secrets, and making it private is recommended once code lands.
-
-## 3. Non-blocking items (decided later, in the phase named)
-
-- SMS and email providers (Phase 9)
-- AI model provider(s) and data-processing terms (Phase 12)
-- Object-storage product (Phase 1, ADR-019)
-- Plan prices and limits (Phase 3)
-- Status-page tooling (Phase 1)
-- Courier partners (Phase 11)
+| # | Item | Why |
+|---|---|---|
+| B1 | **Owner go-ahead to start Phase 1.** | Master Directive §101.19 requires architectural approval before implementation. Nothing else blocks Phase 1: it runs entirely on local Docker, with no domain, machines, payments or Telegram credentials. |
