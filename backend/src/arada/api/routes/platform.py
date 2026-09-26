@@ -68,7 +68,7 @@ async def list_roles(
 async def find_person(
     principal: CurrentPrincipal,
     request: Request,
-    username: str = Query(min_length=3, max_length=64),
+    username: str = Query(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$"),
 ) -> PersonOut:
     async with platform(request, principal) as scope:
         person = await identity.find_by_username(scope, username)

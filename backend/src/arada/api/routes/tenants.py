@@ -268,7 +268,7 @@ async def platform_audit(
     principal: CurrentPrincipal,
     request: Request,
     tenant_id: UUID | None = None,
-    action: str | None = Query(default=None, max_length=80),
+    action: str | None = Query(default=None, pattern=r"^[a-z][a-z0-9_.]{2,79}$"),
     limit: int = Query(default=50, ge=1, le=200),
     before: UUID | None = None,
 ) -> list[AuditEventOut]:

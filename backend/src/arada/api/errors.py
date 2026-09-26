@@ -87,6 +87,9 @@ def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(DBAPIError)
     async def _dbapi(request: Request, exc: DBAPIError) -> JSONResponse:
         state = _sqlstate(exc)
+        if state and state.startswith("22"):  # data exception: bad input reached the DB
+            log.warning("db.data_exception", sqlstate=state)
+            return _problem(request, 422, "invalid-input", "Input contains invalid data")
         if state == "42501":  # RLS or privilege violation: defence in depth fired
             log.error("db.privilege_violation", sqlstate=state)
             return _problem(request, 403, "forbidden", "Not permitted")
