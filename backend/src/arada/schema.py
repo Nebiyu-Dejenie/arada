@@ -12,8 +12,16 @@ from arada.blueprints import tables as blueprint_tables
 from arada.identity import tables as identity_tables
 from arada.kernel.sql import metadata
 from arada.rbac import tables as rbac_tables
+from arada.tenancy import tables as tenancy_tables
 from arada.verticals import tables as vertical_tables
 
-TABLE_MODULES = (audit_tables, identity_tables, vertical_tables, rbac_tables, blueprint_tables)
+TABLE_MODULES = (
+    audit_tables,
+    identity_tables,
+    vertical_tables,
+    rbac_tables,
+    blueprint_tables,
+    tenancy_tables,
+)
 
 __all__ = ["TABLE_MODULES", "metadata"]

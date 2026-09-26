@@ -29,6 +29,7 @@ from arada.rbac.tables import (
     roles,
     vertical_role_assignments,
 )
+from arada.tenancy.tables import tenant_membership_roles, tenant_memberships
 from arada.verticals import service as verticals_service
 from arada.verticals.tables import verticals
 
@@ -233,4 +234,38 @@ async def assign_super_admin_unchecked(conn: AsyncConnection, person_id: UUID) -
     """Bootstrap only (CLI, first run). Never reachable from the API."""
     await conn.execute(
         insert(platform_role_assignments).values(person_id=person_id, role_key="SUPER_ADMIN")
+    )
+
+
+async def load_tenant_grants(conn: AsyncConnection, person_id: UUID) -> frozenset[str]:
+    """Permissions from the person's roles in the *current* tenant.
+
+    Runs inside a tenant context: RLS restricts the membership tables to that
+    tenant, so this can never return another tenant's grants.
+    """
+    return frozenset(
+        (
+            await conn.execute(
+                select(role_permissions.c.permission_key)
+                .distinct()
+                .select_from(tenant_membership_roles)
+                .join(
+                    tenant_memberships,
+                    and_(
+                        tenant_memberships.c.tenant_id == tenant_membership_roles.c.tenant_id,
+                        tenant_memberships.c.id == tenant_membership_roles.c.membership_id,
+                    ),
+                )
+                .join(
+                    role_permissions,
+                    role_permissions.c.role_key == tenant_membership_roles.c.role_key,
+                )
+                .where(
+                    and_(
+                        tenant_memberships.c.person_id == person_id,
+                        tenant_memberships.c.status == "active",
+                    )
+                )
+            )
+        ).scalars()
     )

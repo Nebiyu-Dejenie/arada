@@ -62,6 +62,13 @@ class Scope:
     grants: Grants
 
     @property
+    def tenant_ref(self) -> TenantRef:
+        """The scope's tenant; a programming error to ask for it outside one."""
+        if self.tenant is None:
+            raise RuntimeError("this operation requires a tenant scope")
+        return self.tenant
+
+    @property
     def actor_person_id(self) -> UUID | None:
         return self.principal.person_id if self.principal else None
 

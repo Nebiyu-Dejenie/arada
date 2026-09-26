@@ -29,6 +29,7 @@ from arada.main import create_app
 from arada.ops.db_bootstrap import RolePasswords, bootstrap_roles
 from arada.rbac.bootstrap import bootstrap_super_admin
 from tests.support import DEFAULT_PASSWORD, Persona, enrol_totp, login, unique
+from tests.world import World, build_world
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -194,3 +195,9 @@ async def super_admin(settings: Settings, client: httpx.AsyncClient) -> Persona:
     await login(client, persona)
     await enrol_totp(client, persona)
     return persona
+
+
+@pytest.fixture(scope="session")
+async def world(client: httpx.AsyncClient, super_admin: Persona) -> World:
+    """Two merchants (A, B) with Owner, Admin and Staff each, built via the API."""
+    return await build_world(client, super_admin)

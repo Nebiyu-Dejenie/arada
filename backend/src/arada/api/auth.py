@@ -32,3 +32,14 @@ async def authenticated(request: Request) -> Principal:
 
 
 CurrentPrincipal = Annotated[Principal, Depends(authenticated)]
+
+
+async def optionally_authenticated(request: Request) -> Principal | None:
+    """For endpoints usable both anonymously and logged in (e.g. accepting an
+    invitation). A present-but-invalid token is still rejected."""
+    if "authorization" not in request.headers:
+        return None
+    return await authenticated(request)
+
+
+OptionalPrincipal = Annotated[Principal | None, Depends(optionally_authenticated)]

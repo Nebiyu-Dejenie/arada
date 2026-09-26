@@ -14,7 +14,7 @@ from arada.api.middleware import (
     CorrelationMiddleware,
     SecurityHeadersMiddleware,
 )
-from arada.api.routes import auth, blueprints, health, me, platform
+from arada.api.routes import auth, blueprints, health, me, platform, tenants
 from arada.kernel.config import Settings, get_settings
 from arada.kernel.crypto import Keyring
 from arada.kernel.db import Database
@@ -57,6 +57,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(me.router)
     app.include_router(platform.router)
     app.include_router(blueprints.router)
+    app.include_router(tenants.router)
 
     # Outermost first: correlation wraps everything so even 413s carry ids.
     app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_request_body_bytes)

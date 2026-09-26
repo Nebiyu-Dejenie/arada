@@ -9,7 +9,7 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 
-from arada.access.scopes import platform_scope
+from arada.access.scopes import platform_scope, tenant_scope
 from arada.kernel.config import Settings
 from arada.kernel.context import Principal, RequestMeta
 from arada.kernel.crypto import Keyring
@@ -41,4 +41,11 @@ Meta = Annotated[RequestMeta, Depends(request_meta)]
 async def platform(request: Request, principal: Principal) -> AsyncIterator[Scope]:
     c = container_of(request)
     async with platform_scope(c.db, c.settings, request_meta(request), principal) as scope:
+        yield scope
+
+
+@asynccontextmanager
+async def tenant(request: Request, principal: Principal, slug: str) -> AsyncIterator[Scope]:
+    c = container_of(request)
+    async with tenant_scope(c.db, c.settings, request_meta(request), principal, slug) as scope:
         yield scope

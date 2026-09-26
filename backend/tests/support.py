@@ -92,3 +92,21 @@ async def audit_rows(db: Database, **filters: Any) -> list[Any]:
         query = query.where(getattr(audit_events.c, key) == value)
     async with db.platform_read() as conn:
         return list((await conn.execute(query)).all())
+
+
+def api_operations(app: Any) -> list[tuple[str, str]]:
+    """Every (METHOD, path) the application serves, from its OpenAPI schema.
+
+    ``app.routes`` is not a reliable inventory: FastAPI >= 0.141 nests included
+    routers instead of flattening them, which once made route-enumerating
+    security tests pass vacuously. The OpenAPI document is the public contract
+    of what is served, so tests enumerate that.
+    """
+    operations = [
+        (method.upper(), path)
+        for path, item in app.openapi()["paths"].items()
+        for method in item
+        if method in {"get", "post", "put", "patch", "delete"}
+    ]
+    assert operations, "route enumeration returned nothing"
+    return sorted(operations)
