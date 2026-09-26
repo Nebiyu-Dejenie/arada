@@ -1,12 +1,12 @@
 # 08 — Ledger and Finance
 
-Status: **Proposed** · Related: ADR-013, ADR-014 · Phase 8
+Status: **Accepted in principle** (ADR-013, ADR-014 are mandated by the charter); details Proposed · Phase 4
 
 The ledger is the **authoritative accounting trail** for every financial movement the platform controls or tracks. Historical finance is **never** recomputed from mutable order rows (directive §28).
 
 ## 1. Invariants (enforced by the database, not only by code)
 
-1. **Balanced.** For each `ledger_transaction`, the sum of `amount_minor` over its entries is **0 for each currency**. This is enforced by a `DEFERRABLE INITIALLY DEFERRED` constraint trigger, the same approach proven in the Bingo ledger, extended to check per currency.
+1. **Balanced.** For each `ledger_transaction`, the sum of `amount_minor` over its entries is **0 for each currency**. This is enforced by a `DEFERRABLE INITIALLY DEFERRED` constraint trigger, checked per currency.
 2. **Append-only.** Triggers reject `UPDATE`/`DELETE` on `ledger_transactions` and `ledger_entries`, and `arada_app` has only `INSERT, SELECT`. Corrections are made with **reversing transactions** that link to the original (`reverses_transaction_id`).
 3. **Integer minor units.** ETB is stored in santim (exponent 2). There are no floats anywhere, and currency is explicit on every entry and account.
 4. **Idempotent.** `idempotency_key UNIQUE`, and a key reused for a different `kind` raises an error.
@@ -126,8 +126,8 @@ A rule has a scope, a rate (`rate_bps`), an optional `fixed_minor` fee, optional
 
 | Viewer | Scope | Shows |
 |---|---|---|
-| **Merchant finance** (`merchant.DOMAIN/finance`) | Own tenant (RLS) | Gross sales, platform fees, commissions, payment fees, delivery fees, refunds, adjustments, payable or receivable balance, payouts, transaction history with drill-down to ledger lines, reconciliation status, CSV export (formula-injection-safe) |
-| **Vertical finance** (`finance.DOMAIN`) | Tenants in authorized verticals | The above, aggregated per vertical and per merchant |
+| **Merchant finance** (`merchant.ROOT_DOMAIN/finance`) | Own tenant (RLS) | Gross sales, platform fees, commissions, payment fees, delivery fees, refunds, adjustments, payable or receivable balance, payouts, transaction history with drill-down to ledger lines, reconciliation status, CSV export (formula-injection-safe) |
+| **Vertical finance** (`finance.ROOT_DOMAIN`) | Tenants in authorized verticals | The above, aggregated per vertical and per merchant |
 | **Platform finance / Super Admin** | Everything (platform reader) | Platform P&L by revenue line, provider clearing positions, suspense, reconciliation queue, payout batches, commission rule history |
 
 Every figure on every finance screen is computed **from ledger entries**. A screen may use cached aggregates, but those aggregates are rebuilt from entries. There are no finance numbers derived from `orders` alone.

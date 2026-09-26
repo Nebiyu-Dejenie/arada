@@ -13,7 +13,7 @@ authorize(principal, permission, target_scope) → allow | deny (+ reason)
 - A **permission** is a string `resource.action`, for example `orders.refund`. The permission catalogue is defined in code and seeded by migration.
 - A **role** is a named set of permissions, valid at one scope type. System roles are immutable. Tenants may define **custom tenant roles** later, but only from permissions allowed at tenant scope.
 - **Scope containment:** a platform-scoped assignment applies to all verticals and tenants. A vertical-scoped assignment applies to tenants in that vertical. A tenant-scoped assignment applies only to that tenant. There is **no implicit containment beyond this**: a vertical admin of Phones has no rights in Cars.
-- **There is no god-mode bypass.** `SUPER_ADMIN` is simply the role that holds every permission, and it is checked through the same `authorize` function as every other role, as in the proven Bingo RBAC.
+- **There is no god-mode bypass.** `SUPER_ADMIN` is simply the role that holds every permission, and it is checked through the same `authorize` function as every other role.
 - Authorization is evaluated **server-side on every request**. The UI hides what a user cannot do, for usability only.
 
 ## 2. System roles
@@ -42,15 +42,15 @@ Blueprints can add vertical-specific tenant roles, such as `INSPECTOR` for Cars,
 
 | Area | Permissions |
 |---|---|
-| Platform | `platform.settings.manage`, `security.manage`, `audit.read`, `infra.read`, `deploy.manage`, `flags.manage` |
-| Verticals and blueprints | `vertical.manage`, `blueprint.read`, `blueprint.manage`, `blueprint.publish`, `blueprint.migrate`, `attribute_library.manage` |
-| Tenants | `tenant.create`, `tenant.read`, `tenant.manage`, `tenant.suspend`, `tenant.archive`, `tenant.impersonate_support` (JIT only) |
-| Edge | `domain.manage`, `bot.manage`, `bot.rotate_token` |
-| Staff | `staff.read`, `staff.invite`, `staff.manage_roles` |
-| Catalog | `catalog.read`, `catalog.write`, `catalog.publish`, `inventory.adjust` |
-| Orders | `orders.read`, `orders.create`, `orders.fulfil`, `orders.cancel`, `orders.refund` |
-| Payments | `payments.read`, `payments.configure`, `payments.refund` |
-| Finance | `finance.read`, `finance.export`, `finance.reconcile`, `finance.adjust`, `finance.commission.manage`, `payouts.create`, `payouts.approve`, `payouts.destination.manage` |
+| Platform | `platform.settings.manage`, `security.manage`, `audit.read`, `infra.read`, `deploy.manage`, `flags.manage`, `plans.manage` |
+| Verticals and blueprints | `verticals.manage`, `blueprints.read`, `blueprints.manage`, `blueprints.publish`, `blueprints.migrate`, `attributes.manage` |
+| Tenants | `tenants.create`, `tenants.read`, `tenants.manage`, `tenants.suspend`, `tenants.archive`, `tenants.support_access` (JIT only) |
+| Edge | `domains.manage`, `bots.manage`, `bots.rotate_token` |
+| Users and staff | `users.read`, `users.manage` (platform identities), `staff.read`, `staff.manage`, `staff.manage_roles` |
+| Products | `products.read`, `products.write`, `products.publish`, `inventory.adjust` |
+| Orders | `orders.read`, `orders.write`, `orders.create`, `orders.fulfil`, `orders.cancel`, `orders.refund` |
+| Payments | `payments.read`, `payments.capture`, `payments.refund`, `payments.configure` |
+| Finance | `finance.read`, `finance.export`, `finance.reconcile`, `finance.adjust`, `finance.commission.manage`, `finance.payout` (create), `finance.payout.approve`, `finance.payout_destination.manage` |
 | Customers | `customers.read`, `customers.contact`, `customers.export` |
 | Engagement | `promotions.manage`, `reviews.moderate`, `notifications.send`, `campaigns.manage`, `ads.manage` |
 | Delivery | `delivery.read`, `delivery.update`, `delivery.assign` |

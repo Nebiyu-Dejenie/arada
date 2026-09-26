@@ -4,13 +4,15 @@ Status: **Proposed** · Each test has an id referenced by phase gates (`15`). Te
 
 ## 1. Platform success criteria (directive §99): the end-to-end story
 
+SC-1 is first met in Phase 5 through the provisioning service (CLI or admin endpoint). SC-1…SC-4 are met fully automated at the Phase 6 gate, and SC-5 across Phase 7.
+
 | ID | Given / When / Then |
 |---|---|
-| **SC-1** | **Given** Phones blueprint v1.0 published. **When** Super Admin runs *Create Business* "ABC Phones". **Then** the provisioning run completes with a tenant, roles, a storefront host `abc-phones.DOMAIN` (DNS created **by the platform**), a managed bot with webhook and menu button, a Mini App URL, payment configuration (sandbox), notifications, a health row and analytics, with **zero manual DNS and zero code or deploy changes**. |
+| **SC-1** | **Given** Phones blueprint v1.0 published. **When** Super Admin runs *Create Business* "ABC Phones". **Then** the provisioning run completes with a tenant, roles, a storefront host `abc-phones.ROOT_DOMAIN` (DNS created **by the platform**), a managed bot with webhook and menu button, a Mini App URL, payment configuration (sandbox), notifications, a health row and analytics, with **zero manual DNS and zero code or deploy changes**. |
 | **SC-2** | **When** Super Admin creates "XYZ Phones" from the same blueprint. **Then** it is provisioned identically, **and** no row of either tenant is readable from the other (runs `ISO-*`). |
 | **SC-3** | **When** Phones v1.1 (adds optional `battery_health`) is published. **Then** new merchants get v1.1, ABC and XYZ stay on v1.0 with unchanged forms, and "Upgrade ABC to v1.1" previews and applies without data loss. |
 | **SC-4** | **When** Phones v2.0 renames `ram` → `ram_gb` and makes `condition` required. **Then** the checker forces a major version; migration preview reports affected records; apply succeeds with a backfill; **rollback** restores v1.x data byte-for-byte. |
-| **SC-5** | **When** a Cars blueprint is published and a car merchant created. **Then** it runs on the same release with **no changes outside `blueprints/` and `extensions/`** (CI diff check). Repeat for Property, Food, Jobs and Events in Phase 15. |
+| **SC-5** | **When** a Cars blueprint is published and a car merchant created. **Then** it runs on the same release with **no changes outside `blueprints/` and `extensions/`** (CI diff check). Repeat for Property, Food, Jobs and Events in Phase 7. |
 
 ## 2. Tenant isolation (directive §66): run on every PR
 
@@ -18,7 +20,7 @@ Status: **Proposed** · Each test has an id referenced by phase gates (`15`). Te
 |---|---|---|
 | ISO-1 | Auto-generated: for **every** tenant-scoped endpoint in OpenAPI, call it as a tenant A principal with ids belonging to tenant B | 404 for every call; zero B data in any response body (response scanned for B's ids/refs) |
 | ISO-2 | Send `X-Tenant-ID: B` / `tenant_id: B` in body/query on A's host | Ignored; A context only |
-| ISO-3 | Staff of A requests `merchant.DOMAIN/api/v1/t/{B-slug}/orders` | 404 |
+| ISO-3 | Staff of A requests `merchant.ROOT_DOMAIN/api/v1/t/{B-slug}/orders` | 404 |
 | ISO-4 | Tenant A's valid `initData` presented at B's host | 401 (`bot_mismatch`) |
 | ISO-5 | Raw SQL as `arada_app` with `app.tenant_id` = A: `SELECT * FROM commerce.orders WHERE tenant_id = B` | 0 rows |
 | ISO-6 | Raw SQL with **no** `app.tenant_id` set | 0 rows from every tenant table (fail closed) |
@@ -76,12 +78,12 @@ Status: **Proposed** · Each test has an id referenced by phase gates (`15`). Te
 |---|---|---|
 | EDGE-1 | External nmap of every VM public IP (if any) | No open ports |
 | EDGE-2 | Compose files contain no `ports:` for production services | CI check passes |
-| EDGE-3 | Request an unknown `random123.DOMAIN` | 404 generic (wildcard mode) / NXDOMAIN (explicit mode) |
+| EDGE-3 | Request an unknown `random123.ROOT_DOMAIN` | 404 generic (wildcard mode) / NXDOMAIN (explicit mode) |
 | EDGE-4 | Request a known host with an unmatched path on a non-app host | Traefik default 404 |
 | EDGE-5 | DNS provisioning: `ensure_record` run twice | One record; second call no-op |
 | EDGE-6 | `ensure_record` where the name exists with a foreign target | `DnsConflict`; nothing overwritten; alert |
 | EDGE-7 | Delete a platform hostname through the provider | Refused by the guard |
-| EDGE-8 | `admin.DOMAIN` without Cloudflare Access | Blocked at the edge |
+| EDGE-8 | `admin.ROOT_DOMAIN` without Cloudflare Access | Blocked at the edge |
 | EDGE-9 | Deploy smoke: healthz/readyz of all services; manifest for a test tenant; initData login (test bot); sandbox payment | All pass before a ring advances |
 | EDGE-10 | Rollback to the previous digest after a release | Service healthy; no schema errors |
 | EDGE-11 | Staging secret loaded in production (simulated) | App refuses to start |
@@ -106,7 +108,7 @@ Status: **Proposed** · Each test has an id referenced by phase gates (`15`). Te
 | DR-2 | Quarterly game day: data VM loss on staging | Service restored within the RTO; post-restore reconciliation 100% |
 | DR-3 | Backup repository delete attempt with the backup credentials | Denied (append-only) |
 
-## 8. AI (Phase 12)
+## 8. AI (Phase 8)
 
 | ID | Test | Expected |
 |---|---|---|

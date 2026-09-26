@@ -8,7 +8,7 @@ Status: **Proposed** · OpenAPI 3.1 is generated from the code (FastAPI + Pydant
 |---|---|
 | Style | REST + JSON over HTTPS, resource-oriented. Actions that are really commands use `POST /…/{id}:action` (e.g. `POST /orders/{id}:cancel`). |
 | Versioning | URL major version `/api/v1`. Additive changes need no bump. Removals and semantic changes bump to `/v2`, with a ≥ 6-month overlap. |
-| Origin | Same-origin `/api/*` on each surface host (`05` §3). `api.DOMAIN` serves webhooks and the partner/mobile API. |
+| Origin | Same-origin `/api/*` on each surface host (`05` §3). `api.ROOT_DOMAIN` serves webhooks and the partner/mobile API. |
 | Tenant | **Never** a request field for authorization. It is implied by host (storefront) or path slug + membership (console). |
 | IDs | UUIDv7 strings. Human `ref` values (`ORD-26-000123`) are for display and search. |
 | Money | `{"amount_minor": 1020000, "currency": "ETB"}`. **Never** a JSON float for money. Rates are `rate_bps` integers. |
@@ -27,17 +27,17 @@ Status: **Proposed** · OpenAPI 3.1 is generated from the code (FastAPI + Pydant
 | Surface | Base | Auth | Consumers |
 |---|---|---|---|
 | Runtime | `{host}/api/v1/runtime/*` | none / any | Both bundles at start-up |
-| Customer | `{slug}.DOMAIN/api/v1/*` | Bearer (tenant-bound customer token, `04` §5) | Mini App + web storefront |
-| Merchant console | `merchant.DOMAIN/api/v1/t/{tenant_slug}/*` | Session cookie + CSRF | Merchant staff |
-| Platform console | `admin.DOMAIN/api/v1/platform/*`, `…/v1/verticals/{key}/*` | Cloudflare Access + session + CSRF | Platform and vertical roles |
-| Finance console | `finance.DOMAIN/api/v1/finance/*` | Cloudflare Access + session + CSRF | Finance roles |
-| Telegram webhooks | `api.DOMAIN/tg/wh/{route_key}` | Secret header | Telegram |
-| Payment webhooks | `api.DOMAIN/pay/wh/{provider}/{config_key}` | Provider signature | Providers |
-| Partner API (future) | `api.DOMAIN/api/v1/partner/*` | Hashed API keys, scoped | Integrations |
+| Customer | `{slug}.ROOT_DOMAIN/api/v1/*` | Bearer (tenant-bound customer token, `04` §5) | Mini App + web storefront |
+| Merchant console | `merchant.ROOT_DOMAIN/api/v1/t/{tenant_slug}/*` | Session cookie + CSRF | Merchant staff |
+| Platform console | `admin.ROOT_DOMAIN/api/v1/platform/*`, `…/v1/verticals/{key}/*` | Cloudflare Access + session + CSRF | Platform and vertical roles |
+| Finance console | `finance.ROOT_DOMAIN/api/v1/finance/*` | Cloudflare Access + session + CSRF | Finance roles |
+| Telegram webhooks | `api.ROOT_DOMAIN/tg/wh/{route_key}` | Secret header | Telegram |
+| Payment webhooks | `api.ROOT_DOMAIN/pay/wh/{provider}/{config_key}` | Provider signature | Providers |
+| Partner API (future) | `api.ROOT_DOMAIN/api/v1/partner/*` | Hashed API keys, scoped | Integrations |
 
 ## 3. Key endpoints by phase (initial contract)
 
-### Runtime and auth (Phases 1–4)
+### Runtime and auth (staff in Phase 1; Telegram in Phase 2)
 
 | Method | Path | Notes |
 |---|---|---|
@@ -47,7 +47,7 @@ Status: **Proposed** · OpenAPI 3.1 is generated from the code (FastAPI + Pydant
 | POST | `/api/v1/auth/staff/login` · `/webauthn/*` · `/totp/verify` · `/step-up` | Staff |
 | POST | `/api/v1/auth/logout` | Revokes the session |
 
-### Platform (Phases 1–3)
+### Platform (Phase 1 foundations; Business Factory and migrations in Phase 6)
 
 | Method | Path |
 |---|---|
@@ -65,7 +65,7 @@ Status: **Proposed** · OpenAPI 3.1 is generated from the code (FastAPI + Pydant
 | GET/POST | `/api/v1/platform/roles`, `/role-assignments`, `/access-grants` |
 | GET | `/api/v1/platform/audit-events` |
 
-### Merchant console (Phases 5–8)
+### Merchant console (Phases 3–4; production-grade in Phase 5)
 
 | Method | Path |
 |---|---|
@@ -79,7 +79,7 @@ Status: **Proposed** · OpenAPI 3.1 is generated from the code (FastAPI + Pydant
 | GET/POST | `/api/v1/t/{slug}/staff` · `/staff/{id}/roles` |
 | GET/PUT | `/api/v1/t/{slug}/settings/payments` (step-up) · `/settings/branding` · `/settings/delivery` |
 
-### Customer (Phases 5–7)
+### Customer (Phases 2–4)
 
 | Method | Path |
 |---|---|
@@ -95,7 +95,7 @@ Status: **Proposed** · OpenAPI 3.1 is generated from the code (FastAPI + Pydant
 
 ```json
 {
-  "type": "https://docs.DOMAIN/problems/insufficient-stock",
+  "type": "https://docs.ROOT_DOMAIN/problems/insufficient-stock",
   "title": "Insufficient stock",
   "status": 409,
   "detail": "Only 1 unit of 'Galaxy A55 256GB' is available.",

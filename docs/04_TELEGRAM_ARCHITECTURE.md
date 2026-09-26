@@ -1,6 +1,6 @@
 # 04 — Telegram Architecture
 
-Status: **Proposed** · Related: ADR-011, ADR-012 · Phase 4 · Verified against the Telegram Bot API docs as of Bot API 10.3 (2026-08-24)
+Status: **Proposed** · Related: ADR-011, ADR-012 · Phase 2 (Telegram foundation; BYO bots first), Phase 6 (managed-bot factory) · Checked against the official Telegram Bot API docs as of Bot API 10.3 (2026-08-24). **Never build on a Telegram capability that the current docs don't state** (Permanent Command §12).
 
 Telegram is the **first channel, not the backend** (directive §60). The `telegram` module is an adapter over channel-agnostic commerce modules. Nothing in `orders`, `payments` or `catalog` imports anything from Telegram.
 
@@ -9,12 +9,21 @@ Telegram is the **first channel, not the backend** (directive §60). The `telegr
 | Bot | Owner | Purpose |
 |---|---|---|
 | **Factory bot** (one, platform-owned) | Super Admin's Telegram account | Merchant onboarding, creating merchant bots via **managed bots**, and merchant staff notifications. Has "management of other bots" enabled in the @BotFather Mini App. |
-| **Merchant bots** (one per merchant) | See Q7: the merchant owner (managed bot) or the platform | The customer-facing identity: storefront Mini App, order updates, support chat |
+| **Merchant bots** (one per merchant) | UNKNOWN (U5, owner decision at Phase 2): the merchant owner's account (managed bot) or a platform account | The customer-facing identity: storefront Mini App, order updates, support chat |
 | **Ops bot** (one, platform) | Super Admin | Alerts (Alertmanager), deploy notices, and approvals for sensitive actions |
 
 ## 2. Bot provisioning (directive §12)
 
 ### 2a. Preferred: managed bots (Bot API 9.6+)
+
+> **What this is and is not.** Telegram documents a *supported* flow: a manager bot asks a user to create a bot, and the user completes creation in Telegram's own UI. **The merchant must take that action for every bot;** the platform cannot create bots unilaterally or in unlimited numbers.
+>
+> Before Phase 6 builds on this flow, these points must be **verified** against the docs and a test bot (U6):
+> - limits on managed bots per manager bot
+> - whether the manager can configure the Main Mini App and profile for managed bots by API
+> - ownership-transfer behaviour
+>
+> Until then, §2b (bring your own bot) is the baseline, and Phase 2 is built on it.
 
 ```mermaid
 sequenceDiagram
@@ -52,7 +61,7 @@ The platform cannot rotate a BYO token itself, so rotation is a guided task for 
 
 The **Main Mini App** and **direct-link Mini Apps** (`t.me/bot/app`) must be configured in @BotFather, according to the Mini Apps documentation. The provisioning run records these as a **guided manual step**:
 
-- It gives exact instructions and the URL `https://{slug}.DOMAIN/`.
+- It gives exact instructions and the URL `https://{slug}.ROOT_DOMAIN/`.
 - It verifies the result by opening the direct link in an automated check.
 - It keeps the tenant in `validating` until the check passes.
 
@@ -67,7 +76,7 @@ Bot tokens are **never** sent to any frontend or log line, and never appear in a
 ## 3. Webhook ingress: one endpoint for all bots
 
 ```
-POST https://api.DOMAIN/tg/wh/{webhook_route_key}
+POST https://api.ROOT_DOMAIN/tg/wh/{webhook_route_key}
 Header: X-Telegram-Bot-Api-Secret-Token: <per-bot secret>
 ```
 
@@ -91,7 +100,7 @@ Results feed tenant health (`12` §5).
 
 ## 4. Mini App (directive §13)
 
-- **URL:** `https://{slug}.DOMAIN/`. It is the same origin as the web storefront, so there is one runtime, and it uses the `customer` bundle.
+- **URL:** `https://{slug}.ROOT_DOMAIN/`. It is the same origin as the web storefront, so there is one runtime, and it uses the `customer` bundle.
 - **Launch surfaces:**
   - Main Mini App (`t.me/{bot}?startapp=…`)
   - direct link (`t.me/{bot}/{app}?startapp=…`)
@@ -112,7 +121,7 @@ The server validates:
    - `secret_key = HMAC_SHA256(key="WebAppData", msg=bot_token)`
    - `data_check_string` = every received field except `hash`, sorted by key, formatted as `k=v` and joined with `\n`
    - Require `hex(HMAC_SHA256(key=secret_key, msg=data_check_string))` to equal `hash`, compared in constant time.
-3. **Ed25519 `signature`.** This is defense in depth, and it is **new compared with the existing Bingo validator**.
+3. **Ed25519 `signature`.** This is defense in depth that goes beyond the common HMAC-only implementations.
    - `data_check_string' = "<bot_id>:WebAppData\n"` + all fields except `hash` and `signature`, sorted, `k=v`, joined with `\n`
    - Verify the base64url `signature` using Telegram's published Ed25519 public key (production and test keys are configured per environment).
    - *Why:* the HMAC proves the data was signed by someone holding the bot token. **Anyone holding the token, such as a BYO merchant or a leaked token, can forge HMAC-valid `initData` for any user.** The Ed25519 signature can only be produced by Telegram, so requiring it closes that impersonation path.
@@ -139,7 +148,7 @@ When the refresh handle expires, the client re-exchanges the current `initData`,
 | `o_<token>` | Order | Tenant match, **and** the order must belong to the authenticated customer, otherwise not found |
 | `c_<code>` | Campaign | Campaign active in this tenant |
 | `r_<code>` | Referral | Referral code issued by the server to a customer of *this* tenant |
-| `m_<token>` | Merchant landing, for the future cross-merchant `app.DOMAIN` | Directory entry must be public |
+| `m_<token>` | Merchant landing, for the future cross-merchant `app.ROOT_DOMAIN` | Directory entry must be public |
 | `onb_<token>` | Factory-bot onboarding | Single-use provisioning reference |
 
 Referral attribution happens **server-side**:

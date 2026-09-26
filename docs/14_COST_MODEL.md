@@ -1,90 +1,98 @@
 # 14 — Cost Model
 
-Status: **Proposed** · Directive §61, §88–90 · All figures are **planning estimates** to be replaced by measurements (§3)
+Status: **Proposed** · Master Directive §61, §88–90; Permanent Command §45 · **This document contains no invented resource figures.** Every number is either measured (§3) or set by the owner as a business decision (§5).
 
-The metric that matters is **cost per active merchant**, not total infrastructure cost.
+The target is not the cheapest possible platform. It is **maximum business capability per unit of infrastructure cost without sacrificing reliability or security** (Permanent Command §45). The key metric is **cost per active merchant**.
 
 ## 1. Cost structure
 
 | Category | Driver | Shared or per merchant |
 |---|---|---|
-| Compute (VMs) | Request volume, worker jobs | Shared (fixed step costs) |
-| PostgreSQL storage | Rows × indexes | Grows per merchant |
-| Object storage | Images and documents | Grows per merchant (**dominant**) |
-| Backups (off-site) | ≈2× DB + media | Grows per merchant |
-| Cloudflare | Plan tier; DNS record count (`05` §5) | Free at launch; step cost at scale |
-| Telegram | Bot API | **Free** (paid broadcast only if ever used) |
-| SMS / email | Messages sent | Per merchant (metered, pass-through or plan-limited) |
-| AI | Tokens per request × model price | Per merchant (**must be budgeted**, §6) |
-| Payment fees | % of GMV per provider | Per transaction (merchant-borne or priced into commission) |
-| Delivery | Per delivery | Per order (priced to the customer or merchant) |
-| Support | Tickets × time | Per merchant (tracked by ticket tenant) |
+| Compute (VMs) | Request volume, worker jobs | Shared (step costs as hosts are added) |
+| PostgreSQL storage | Rows × average width + indexes | Grows per merchant |
+| Object storage | Images and documents | Grows per merchant (likely dominant; confirm by measurement) |
+| Backups (off-host) | Database + media + WAL retention | Grows per merchant |
+| Cloudflare | Plan tier; DNS records per zone (`05` §5) | Plan-dependent |
+| Telegram | Bot API | No per-message fee for standard bot messages |
+| SMS / email | Messages sent | Per merchant (metered; pass-through or plan-limited) |
+| AI | Tokens × model price | Per merchant (**must be budgeted**, §6) |
+| Payment fees | Provider rate × volume | Per transaction (merchant-borne or priced into commission) |
+| Delivery | Per delivery | Per order |
+| Support | Tickets × handling time | Per merchant |
 
-## 2. Unit estimates (to validate)
+## 2. Unit-cost formulas (the values come from measurement)
 
-A "typical Starter merchant": 500 listings, 3 images each, 300 orders per month, 1,500 customers.
+```
+db_bytes(tenant)      = Σ_tables rows(tenant, table) × avg_row_bytes(table) × (1 + index_overhead(table))
+media_bytes(tenant)   = Σ_assets Σ_variants bytes(variant)          (originals are not retained by default)
+backup_bytes(tenant) ≈ db_bytes × retention_factor_db + media_bytes × versions_factor
+compute_share(tenant) = tenant_requests / total_requests × shared_compute_cost
+                      + tenant_worker_seconds / total_worker_seconds × worker_cost
+```
 
-| Resource | Estimate per merchant per year | Notes |
-|---|---|---|
-| Postgres rows | ≈ 50k (listings, projections, orders, transitions, ledger lines, events) | |
-| Postgres size incl. indexes | **≈ 50–150 MB** | Ledger and audit dominate over time |
-| Media | 500 × 3 × (full ≈150 KB WebP + card 40 KB + thumb 10 KB) ≈ **0.3 GB** | Enforced by the pipeline: originals are **not** kept by default (max 1600 px, re-encoded) |
-| Backup footprint | ≈ 2× (DB + media) ≈ **0.8 GB** | Deduplicated and compressed by pgBackRest |
-| Notifications | ≈ 1,500 Telegram messages/month (free); SMS only on opt-in | |
-| AI | Plan-dependent (§6) | |
-
-**Capacity of the Stage-1 topology** (`11` §2), to validate by load test: several hundred active Starter merchants and roughly 20–50 req/s of sustained API traffic. Storage, not CPU, is the first constraint (≈ 1 TB covers roughly 1,000 merchants' media and backups).
+- `avg_row_bytes` and `index_overhead` come from `pg_stat_user_tables`, `pg_total_relation_size` and `pgstattuple`.
+- Variant sizes come from the media pipeline's own output metrics.
+- Media-pipeline policy (`09` §8) is the main cost lever: no originals, a maximum dimension, modern formats.
 
 ## 3. Measuring instead of guessing
 
-- `usage_counters(tenant_id, meter, period, value)` is written by `scheduler` from events and storage scans. Meters: `listings`, `media_bytes`, `db_bytes_est` (rows × average width), `orders`, `api_requests`, `worker_seconds`, `notifications_{channel}`, `ai_tokens_{in,out}`, `ai_cost_minor`, `payment_volume_minor`, `support_tickets`.
-- **Cost allocation** each month:
+- `usage_counters(tenant_id, meter, period, value)` is written by `scheduler` from events and storage scans. Meters: `listings`, `media_bytes`, `db_bytes_est`, `orders`, `api_requests`, `worker_seconds`, `notifications_{channel}`, `ai_tokens_{in,out}`, `ai_cost_minor`, `payment_volume_minor`, `support_tickets`.
+- **Monthly cost allocation:** `cost_per_merchant = Σ direct metered cost + shared fixed cost × weighted share (requests + storage)`. This is shown in the Super Admin console next to the merchant's revenue contribution (commission + subscription + ads), giving a **contribution margin per merchant**.
+- **Capacity numbers** (requests/s per `api` replica, jobs/s per worker, merchants per host) are produced by:
+  - the Phase 1 local profile, which is indicative only because a dev machine is not production
+  - **k6 load tests on the real machines at Phase 5**
 
-  ```
-  cost_per_merchant = Σ(direct metered cost)
-                    + shared_fixed × (merchant's weighted share by requests + storage)
-  ```
-
-  This is shown in the Super Admin console next to the merchant's revenue contribution (commission + subscription + ads), which gives a **contribution margin per merchant**.
-- **Phase 1 exit includes a load test** (k6) that measures requests/s per `api` replica and the queue throughput per worker. Its results replace §2's guesses.
+  They are recorded in `11` §3 and an ADR. They are never assumed.
 
 ## 4. Cost controls built into the architecture
 
-- One shared stack. No per-merchant VM, database, Redis or deployment by default (directive §61).
-- Placement tiers let expensive isolation be **sold**, not given away (Pro and Enterprise plans).
-- Media pipeline: no originals, WebP/AVIF, an immutable-key CDN cache at Cloudflare (egress from origin minimised).
-- Aggressive partitioning and retention (outbox pruned after 14 days, logs 14–30 days, traces 7 days).
-- Cloudflare Free plan until a documented trigger: DNS record count > 80% of the limit (→ wildcard mode, or upgrade), or a need for advanced WAF, image optimisation or rate-limiting features.
+- One shared stack. There is no per-merchant VM, database, Redis or deployment by default (Master §61).
+- Isolation tiers let expensive isolation be **sold** (Pro and Enterprise plans), not given away.
+- The media pipeline stores no originals, re-encodes images and uses immutable-key caching at Cloudflare.
+- Partitioning and retention: outbox pruning, and log and metric retention sized to measured storage.
+- No premature infrastructure: no Kubernetes, message broker or search cluster until metrics justify it (ADR-016/018/020).
+- Cloudflare plan upgrades are triggered by documented events, such as the DNS record count nearing the zone limit or a needed feature. They are never pre-emptive.
 
-## 5. Plans and entitlements (directive §90)
+## 5. Plans and entitlements (Master §90)
 
-Plans are **data**: `plans`, `plan_entitlements(plan_id, key, limit, overage_policy)`. Enforcement lives in **one place**, `plans.check(ctx, key, increment)`, which is called by modules at the point of creation. No `if plan == "PRO"` appears anywhere.
+Plans are **data**: `plans` and `plan_entitlements(plan_id, key, limit, overage_policy)`. They are enforced in one place, `plans.check(ctx, key, increment)`, called by modules at the point of creation. No `if plan == "PRO"` appears anywhere.
 
 | Entitlement | FREE | STARTER | PRO | BUSINESS | ENTERPRISE |
 |---|---|---|---|---|---|
-| Active listings | 50 | 500 | 5,000 | 25,000 | custom |
-| Staff seats | 1 | 3 | 10 | 30 | custom |
-| Orders / month | 100 | 1,000 | 10,000 | 50,000 | custom |
-| Media storage | 1 GB | 5 GB | 25 GB | 100 GB | custom |
-| AI credits / month | minimal | small | medium | large | custom |
-| Analytics | basic | basic | advanced | advanced + export | custom |
-| Integrations / API keys | — | — | ✓ | ✓ | ✓ |
-| Automation (workflows, campaigns) | — | basic | ✓ | ✓ | ✓ |
-| Isolation tier | Starter | Starter | Starter | Pro | Enterprise |
-| Support | community | standard | priority | priority | dedicated |
+| Active listings | TBD | TBD | TBD | TBD | custom |
+| Staff seats | TBD | TBD | TBD | TBD | custom |
+| Orders / month | TBD | TBD | TBD | TBD | custom |
+| Media storage | TBD | TBD | TBD | TBD | custom |
+| AI credits / month | TBD | TBD | TBD | TBD | custom |
+| Analytics level | TBD | TBD | TBD | TBD | custom |
+| Integrations / API keys | TBD | TBD | TBD | TBD | ✓ |
+| Automation | TBD | TBD | TBD | TBD | ✓ |
+| Isolation tier | Starter | Starter | Starter | Starter or Pro (TBD) | Enterprise |
+| Support level | TBD | TBD | TBD | TBD | dedicated |
 
-The numbers are placeholders for the business to set. The **mechanism** is what matters. Overage policies are `block`, `allow_and_bill` or `soft_warn`, per entitlement.
+The limits and prices are **business decisions for the owner**, informed by the §3 cost-per-merchant data once it exists. The **mechanism** is what gets built. Overage policies per entitlement: `block`, `allow_and_bill` or `soft_warn`.
 
-## 6. AI cost control (directive §89)
+## 6. AI cost control (Master §89)
 
-- **Gateway only.** All model calls go through `intelligence.ai.gateway`, which has:
-  - a provider abstraction and a model-routing table (cheap model by default; a larger model only for tasks that need it)
-  - per-tenant **monthly budgets** in money (`ai_cost_minor`) and **rate limits** (requests per minute per principal)
-  - a **response cache** keyed on normalised input for deterministic tasks (translations, descriptions)
+- **Gateway only.** All model calls go through `intelligence.ai.gateway`, which provides:
+  - a provider abstraction and a model-routing table (the cheapest capable model by default)
+  - per-tenant **monthly budgets** in money (`ai_cost_minor`)
+  - **rate limits** per principal
+  - a **response cache** for deterministic tasks (translations, descriptions)
   - token accounting per call, attributed to the tenant and the feature
-  - fallbacks: on budget exhaustion, a degraded mode (templates or search-only) rather than an error, and the merchant is notified
-- **Structured intent, not free text:** customer queries (including Amharic, directive §73) are converted into a **structured search intent** (JSON Schema-validated), and the commerce engine executes it. This keeps model output small and cheap, and keeps business logic out of the model.
+  - fallbacks: on budget exhaustion, a degraded mode (templates or search-only), and the merchant is notified
+- **Structured intent, not free text.** Customer queries, including Amharic (Master §73), are converted into a schema-validated **search intent**, and the commerce engine executes it. This keeps model output small and keeps business logic out of the model.
 
-## 7. Revenue mechanisms supported (directive §74)
+## 7. Revenue mechanisms supported (Master §74)
 
-Commission (per rule precedence, `08` §6), subscriptions (plans), featured listings and ads (`advertising` module), lead fees (inquiry-only verticals: fee per qualified inquiry), delivery margin, service and ticket fees, B2B transaction fees, AI and analytics add-ons, and verification services. Each is a separate **revenue account** in the ledger (`08` §3), so profitability is measurable per line.
+Each of these is a separate **revenue account** in the ledger (`08` §3), so profitability is measurable per line:
+
+- commission (rule precedence, `08` §6)
+- subscriptions (plans)
+- featured listings and ads (`advertising`)
+- lead fees (inquiry-only verticals)
+- delivery margin
+- service and ticket fees
+- B2B transaction fees
+- AI and analytics add-ons
+- verification services

@@ -22,7 +22,7 @@ erDiagram
   VERTICAL ||--o{ TENANT : classifies
   TENANT ||--|| MERCHANT : "business profile"
   TENANT }o--|| BLUEPRINT_VERSION : "pinned to"
-  TENANT ||--o{ DOMAIN : "served on"
+  TENANT ||--o{ ROOT_DOMAIN : "served on"
   TENANT ||--o| BOT : "has"
   TENANT ||--|| TENANT_PLACEMENT : "data lives in"
   PERSON ||--o{ IDENTITY : "authenticates via"
@@ -80,10 +80,10 @@ The tier is a **placement decision recorded in data**, not a code fork.
 
 | Surface | Trusted source | Binding check |
 |---|---|---|
-| Storefront / Mini App (`{slug}.DOMAIN`) | `Host` header → `control.domains` (normalised: lower-case, IDNA, no port, no trailing dot) → tenant | Tenant must be `ready` or `active`, and the domain must be `active`. For Telegram sessions, `initData` must validate against **this tenant's** bot, and its `bot_id` must equal the tenant's bot (`04` §5). |
-| Telegram webhook (`api.DOMAIN/tg/wh/{route_key}`) | `route_key` (random, 32 bytes) → bot → tenant | `X-Telegram-Bot-Api-Secret-Token` must equal that bot's secret (constant-time comparison) |
-| Payment webhook (`api.DOMAIN/pay/wh/{provider}/{config_key}`) | `config_key` → payment configuration → tenant | Provider signature verified with that configuration's credentials. The amount and reference must match an existing intent of that tenant. |
-| Console (`merchant.DOMAIN`) | Server-side session → person → memberships | A path `/t/{tenant_slug}/…` is a *request* to act in that tenant and is authorized against memberships. The active tenant is stored in the server session. |
+| Storefront / Mini App (`{slug}.ROOT_DOMAIN`) | `Host` header → `control.domains` (normalised: lower-case, IDNA, no port, no trailing dot) → tenant | Tenant must be `ready` or `active`, and the domain must be `active`. For Telegram sessions, `initData` must validate against **this tenant's** bot, and its `bot_id` must equal the tenant's bot (`04` §5). |
+| Telegram webhook (`api.ROOT_DOMAIN/tg/wh/{route_key}`) | `route_key` (random, 32 bytes) → bot → tenant | `X-Telegram-Bot-Api-Secret-Token` must equal that bot's secret (constant-time comparison) |
+| Payment webhook (`api.ROOT_DOMAIN/pay/wh/{provider}/{config_key}`) | `config_key` → payment configuration → tenant | Provider signature verified with that configuration's credentials. The amount and reference must match an existing intent of that tenant. |
+| Console (`merchant.ROOT_DOMAIN`) | Server-side session → person → memberships | A path `/t/{tenant_slug}/…` is a *request* to act in that tenant and is authorized against memberships. The active tenant is stored in the server session. |
 | Console (`admin.` / `finance.`) | Session + platform or vertical scoped roles | Vertical admins are filtered to their verticals; cross-vertical access needs an explicit grant. |
 | Internal jobs | Tenant id carried in the event envelope or job payload, written by the server | Consumers re-establish `RequestContext` with `principal = system:<job>` and `SET LOCAL app.tenant_id` |
 | Resource links (`startapp=p_…`, order links) | Opaque token resolved **inside** the already-resolved tenant | A product token from tenant A presented on tenant B's host resolves to *not found*, not a redirect |

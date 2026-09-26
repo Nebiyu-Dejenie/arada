@@ -22,12 +22,14 @@ Every request, job and event carries:
 ```
 app (OTel SDK: traces + metrics + structlog JSON logs)
   → otel-collector (batching, tail sampling, attribute redaction)
-      → Tempo (traces, 7 d)       → Prometheus (metrics, 30 d)       → Loki (logs, 14–30 d)
+      → Prometheus (metrics)      → Loki (logs)      → Tempo/Jaeger (traces; added LATER, Permanent Command §24)
                                          → Alertmanager → Ops Telegram chat (+ email fallback)
-Grafana (ops.DOMAIN, Cloudflare Access) reads all three.
+Grafana reads them (in production via `ops.ROOT_DOMAIN` behind Cloudflare Access; locally on `localhost`). Retention periods are set once storage is known (U2).
+
+Until a trace backend is added, trace and span ids are still generated, propagated and written into every log line, so Loki can correlate a whole request, job or event chain.
 ```
 
-- **Tail sampling:** keep 100% of traces with errors, slow requests (> 1 s) and payment or ledger spans; keep 10% of everything else.
+- **Tail sampling** (once a trace backend exists): keep 100% of traces with errors, slow requests and payment or ledger spans; sample the rest.
 - **Logs:** structured JSON, redacted (`09` §10), with one line per request (access log) plus domain events at `info`.
 
 ## 3. Cardinality rule for thousands of tenants (ADR-023)
@@ -35,7 +37,7 @@ Grafana (ops.DOMAIN, Cloudflare Access) reads all three.
 `tenant_id` is **not** a Prometheus label on high-volume metrics. With thousands of tenants it would multiply series without bound. Instead:
 
 - **Prometheus** holds platform-wide and per-vertical, per-plan and per-provider metrics (bounded label sets).
-- **Per-tenant views** (directive §84) come from logs and traces, which are filterable by `tenant_id` in Loki and Tempo, and from **`control.tenant_health`** plus hourly **tenant metric rollups** in Postgres, written by `scheduler` from those sources.
+- **Per-tenant views** (directive §84) come from logs and traces, which are filterable by `tenant_id` in Loki (and the trace backend, once added), and from **`control.tenant_health`** plus hourly **tenant metric rollups** in Postgres, written by `scheduler` from those sources.
 - Exception: a **bounded top-N** exporter publishes per-tenant series for the 50 highest-traffic tenants and any tenant with an open incident.
 
 ## 4. What is measured
@@ -53,6 +55,10 @@ Grafana (ops.DOMAIN, Cloudflare Access) reads all three.
 | Ingress | cloudflared connection count and health, Traefik 404 rate on unknown hosts (probing indicator) |
 | Workers | Heartbeat age, throughput, image-processing time, AI cost/min |
 | Business | Orders/min, GMV (from ledger), active tenants, checkout funnel |
+| Hosts | VM CPU, RAM, disk usage and growth rate, disk I/O, network (node-exporter), container restarts |
+| Data growth | Database size per schema, largest tables, per-tenant row/byte estimates (`14` §3), object-store bytes |
+| Backups | Time since the last successful backup and WAL push, the last restore-verification result and its duration (`13` §3) |
+| Tunnel | cloudflared connections per replica, edge errors, tunnel-reported health |
 
 ## 5. Tenant health (directive §85)
 
@@ -60,7 +66,7 @@ Computed every 5 minutes. **Never user-settable.**
 
 | Subsystem | Healthy when |
 |---|---|
-| Domain | DNS record present, TLS valid, external probe of `https://{slug}.DOMAIN/healthz` returns 200 within 2 s |
+| Domain | DNS record present, TLS valid, external probe of `https://{slug}.ROOT_DOMAIN/healthz` returns 200 within 2 s |
 | API | Tenant's 5xx rate < 1% and p95 < 1 s over 15 minutes (from rollups) |
 | Bot | `getMe` succeeds, webhook URL matches, `last_error_date` older than 15 minutes, pending updates < 100 |
 | Mini App | Main app verified; client error rate < 2% |

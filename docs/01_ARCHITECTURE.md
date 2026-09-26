@@ -1,6 +1,6 @@
 # 01 — Architecture
 
-Status: **Proposed, awaiting approval** · Owner: CTO · Related: `20_DECISIONS.md` (ADR-001…025)
+Status: **Proposed, awaiting approval** · Owner: CTO · Governing charter: `charter/` · Related: `20_DECISIONS.md` (ADR-001…028)
 
 ## 1. What we are building
 
@@ -19,6 +19,26 @@ Three levels (directive §2):
 | **Platform** | Identity, tenancy, blueprint engine, provisioning, payments, ledger, notifications, search, AI, analytics, audit, infrastructure | Code releases (shared by all) |
 | **Vertical** | A blueprint *family*: entities, attributes, forms, workflows, rules, commission defaults, templates, AI and analytics config | Blueprint versions (data, not code) |
 | **Merchant** | An isolated business instance pinned to one blueprint version: its customers, catalog, orders, money, staff, branding, bot and Mini App | Tenant configuration (data) |
+
+## 1a. The four-level rule (Permanent Command §3)
+
+Every feature is classified before design, and levels are never mixed:
+
+| Level | Owns | Examples | Changes through |
+|---|---|---|---|
+| **Platform** | Shared capabilities | Authentication, tenant resolution, billing, audit, payment orchestration, notification infrastructure | Code releases |
+| **Vertical** | Domain rules for one business category | Car VIN, property bedrooms, phone IMEI, event seat maps | Blueprint versions + registered extensions |
+| **Tenant** | One merchant's configuration and data | Branding, commission overrides, staff, payment configuration, catalog | Tenant configuration and data (RLS-scoped) |
+| **Customer** | One person's relationship with one tenant | Profile, addresses, orders, preferences | Customer actions under the customer's own authorization |
+
+## 1b. Product surfaces
+
+| Surface | Capabilities (charter) | Visibility rule |
+|---|---|---|
+| **Mini App / storefront** (customer) | Discovery, search, product or service detail, cart, checkout, order tracking, customer account, notifications, reviews, merchant information, promotions, recommendations; AI shopping assistant later | Tenant resolved server-side. The frontend receives presentation configuration only. |
+| **Merchant portal** | Dashboard, products/listings, orders, customers, staff, payments, finance, promotions, reviews, delivery, analytics, notifications, settings, Telegram, AI assistant | Each menu item appears only if the user holds the permission **and** the feature is enabled for the tenant |
+| **Finance portal** | Transactions, ledger, receivables, payables, commissions, refunds, payouts, reconciliation, settlement, reports, audit | A separate workspace. Financial data is never editable as CRUD; changes are postings, reversals and approved adjustments. |
+| **Super Admin control plane** | Tenants, verticals, blueprints and versions, users, roles, permissions, plans, feature flags, payments, finance, bots, Mini Apps, domains, infrastructure, notifications, advertising, analytics, AI, audit, system health | Dangerous operations need an elevated permission, confirmation, audit, and step-up MFA where appropriate |
 
 ## 2. Architectural style
 
@@ -58,7 +78,7 @@ flowchart TB
     PG[(PostgreSQL)]
     RD[(Redis)]
     OBJ[(S3-compatible object store)]
-    OBS[Prometheus · Loki · Tempo · Grafana]
+    OBS[Prometheus · Loki · Grafana<br/>traces backend later]
   end
   C --> CF
   M --> CF
@@ -105,23 +125,25 @@ The pipeline produces an immutable `RequestContext` that every module receives. 
 | Control | `tenancy` | organizations, tenants, merchants, memberships, placement, lifecycle | 1 |
 | Control | `rbac` | roles, permissions, scoped assignments, support-access grants | 1 |
 | Control | `audit` | append-only audit events | 1 |
-| Control | `flags` · `plans` | feature flags, plans, entitlements, quotas, usage meters | 1 / 3 |
-| Control | `blueprint` | verticals, attribute library, blueprints, versions, migrations, rule engine | 2 |
-| Control | `provisioning` | Business Factory sagas, validation, activation | 3 |
-| Control | `edge` | domains, Cloudflare DNS/Tunnel provider, hostname verification | 3 |
-| Control | `telegram` | bots, managed-bot factory, Mini App config, webhook multiplexer | 4 |
-| Commerce | `catalog` · `inventory` · `search` | listings, variants, stock, search projection | 5 |
-| Commerce | `workflow` | state-machine runtime driven by blueprint definitions | 2 / 6 |
-| Commerce | `orders` · `customers` | carts, orders, order state, customer records per tenant | 6 |
-| Finance | `payments` | payment intents, attempts, provider adapters, provider-event inbox | 7 |
-| Finance | `ledger` · `commissions` · `payouts` · `reconciliation` | double-entry ledger, rules, settlements | 8 |
-| Engagement | `notifications` | templates, channels (Telegram, SMS, email, in-app), preferences | 9 |
-| Engagement | `reviews` · `promotions` · `referrals` | eligibility, coupons, campaigns, attribution | 10 |
-| Commerce | `delivery` | zones, pricing, couriers, proof of delivery | 11 |
-| Intelligence | `ai` | AI gateway, tool registry, budgets, conversation and action logs | 12 |
-| Intelligence | `analytics` · `trust` · `risk` | event facts, KPIs, trust signals, risk signals | 13 |
-| Engagement | `advertising` | placements, sponsored search, billing | 14 |
-| Support | `support` | tickets, disputes, escalation | 11+ |
+| Control | `flags` · `plans` | feature flags (platform → vertical → tenant), plans, entitlements, quotas, usage meters | 1 / 6 |
+| Control | `blueprint` | verticals, attribute library, blueprints, versions, pinning, rule engine (foundation); version migrations | 1 / 6 |
+| Control | `provisioning` | Provisioning service (CLI or admin endpoint from Phase 1); full Business Factory saga | 1 / 6 |
+| Control | `edge` | domains table and host resolution; Cloudflare DNS/Tunnel provider and hostname verification | 1 / 6 |
+| Control | `telegram` | bots, webhook multiplexer, Mini App auth, deep links; managed-bot factory | 2 / 6 |
+| Commerce | `catalog` · `inventory` · `search` | listings, variants, stock, search (FTS + trigram + filters) | 3 |
+| Commerce | `workflow` | state-machine runtime driven by blueprint definitions | 1 / 3 |
+| Commerce | `orders` · `customers` · `cart` | carts, checkout, orders (core lifecycle + vertical workflow), customer records per tenant | 3 |
+| Finance | `payments` | payment intents, attempts, provider adapters, provider-event inbox | 4 |
+| Finance | `ledger` · `commissions` · `payouts` · `reconciliation` | double-entry ledger, rules, settlements | 4 |
+| Engagement | `notifications` | templates, channels (Telegram first; SMS, email, in-app), preferences | 2 / 3 |
+| Engagement | `reviews` | eligibility-gated reviews | 3 |
+| Engagement | `promotions` · `referrals` · `loyalty` | coupons, campaigns, attribution, loyalty | 8 |
+| Commerce | `delivery` | zones, pricing, couriers, proof of delivery | 8 |
+| Intelligence | `ai` | AI gateway, tool registry, budgets, conversation and action logs | 8 |
+| Intelligence | `analytics` | event facts, KPIs (merchant basics in 5; advanced in 8) | 5 / 8 |
+| Intelligence | `trust` · `risk` | trust signals, fraud/risk signals | 8 |
+| Engagement | `advertising` | placements, sponsored search, billing | 8 |
+| Support | `support` | tickets, disputes, escalation | 8 |
 
 **Module rules:**
 
@@ -136,8 +158,8 @@ One TypeScript codebase is built into **two bundles**. It is never built per mer
 
 | Bundle | Served on | Audience | Why separate |
 |---|---|---|---|
-| `customer` | `{slug}.DOMAIN` (web + Telegram Mini App) | Customers | It must be small and fast inside the Telegram WebView, and it renders merchant-supplied content, so it must never share an origin with staff sessions. |
-| `console` | `admin.`, `finance.`, `merchant.DOMAIN` | Super Admin, vertical admins, merchant staff | Heavy tables, forms and charts. Permission-gated screens. |
+| `customer` | `{slug}.ROOT_DOMAIN` (web + Telegram Mini App) | Customers | It must be small and fast inside the Telegram WebView, and it renders merchant-supplied content, so it must never share an origin with staff sessions. |
+| `console` | `admin.`, `finance.`, `merchant.ROOT_DOMAIN` | Super Admin, vertical admins, merchant staff | Heavy tables, forms and charts. Permission-gated screens. |
 
 At start-up, each bundle fetches a **Runtime Manifest** from `GET /api/v1/runtime/manifest`, which the server resolves from the host and session. It contains:
 
@@ -163,17 +185,18 @@ The UI then renders from a registry of field and block components. A phone store
 
 | Concern | Choice | ADR |
 |---|---|---|
-| Backend | Python 3.13+, FastAPI, Pydantic v2, SQLAlchemy 2 Core over asyncpg, Alembic | 004 |
+| Backend | Python 3.12+, FastAPI, Pydantic v2, SQLAlchemy 2 Core over asyncpg, Alembic *(Assumed)* | 004 |
+| Configuration | Centralised typed settings (pydantic-settings). `ROOT_DOMAIN` and every hostname are configuration, never literals. Secrets come from a secret provider, never from committed files. | 017, 026 |
 | Frontend | TypeScript, React, Vite, pnpm workspaces | 005 |
 | Telegram | aiogram 3 (multi-bot webhook), Bot API managed bots | 011 |
 | Database | PostgreSQL 17+ with RLS | 002 |
 | Cache, locks, rate limits | Redis 7 (non-authoritative) | — |
 | Events | Transactional outbox in Postgres + inbox dedupe; a broker only when measured need arises | 016 |
 | Object storage | S3 API; server product chosen after a licence/maintenance review | 019 |
-| Search | Postgres full-text search + typed attribute projection behind `SearchPort`; OpenSearch later | 018 |
+| Search | Postgres full-text search + trigram (`pg_trgm`) + typed attribute filters behind `SearchPort`; OpenSearch only when Postgres is insufficient | 018 |
 | Rules | JSONLogic, evaluated identically in the browser (UX) and on the server (authority) | 007 |
 | Ingress | Cloudflare → cloudflared (container) → Traefik v3, all config in git | 010 |
-| Observability | OpenTelemetry → Collector → Prometheus / Loki / Tempo → Grafana, with Alertmanager to a Telegram ops chat | 023 |
+| Observability | OpenTelemetry → Collector → Prometheus / Loki → Grafana, with Alertmanager to a Telegram ops chat. Tempo/Jaeger traces later. | 023 |
 | Infra as code | Docker Compose, Ansible, Terraform (Cloudflare), cloud-init | 020 |
 | CI/CD | GitHub Actions: build, test and scan on hosted runners; deploy pull-based on private infra | — |
 

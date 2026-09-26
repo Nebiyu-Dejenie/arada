@@ -1,8 +1,8 @@
 # 05 — Domain, DNS and Tunnel
 
-Status: **Proposed, blocked on Q1 (which root domain) and Q3 (approve the hostname scheme)** · Related: ADR-008, ADR-009, ADR-010
+Status: **ROOT_DOMAIN = TBD (ADR-026). The naming convention is deferred to the domain/tenant-routing phase (ADR-008, Permanent Command §27).** The principles in §1 and §6–§9 are Proposed now; §2–§5 are evaluated input for that later decision. · Related: ADR-008, ADR-009, ADR-010
 
-`DOMAIN` below means the single root domain chosen in Q1. No other root domain, public IP or origin exposure is introduced (directive §14–15).
+`ROOT_DOMAIN` below is the single root domain, a **configuration value** that the owner supplies at the domain phase (Permanent Command §26–27, §51). It is never hard-coded. `arada.fun` and `arada.click` are unrelated projects and are never used. No other root domain, public IP or origin exposure is introduced.
 
 ## 1. Chain of custody
 
@@ -12,14 +12,14 @@ Registrar (Hostinger)  →  Cloudflare nameservers  →  Cloudflare DNS (proxied
    →  cloudflared container  →  Traefik (single ingress, default 404)  →  web / api containers
 ```
 
-- **Tunnel and zone must live in the same Cloudflare account.** The two current `arada.*` zones appear to be on different accounts (`00_DISCOVERY.md` §3), so Q1 includes confirming the account.
-- **One production tunnel** for the whole platform, separate from the gaming products' tunnels. Staging gets its own tunnel, so a staging credential can never serve production traffic.
+- **The tunnel and the zone must live in the same Cloudflare account.** The account is confirmed together with `ROOT_DOMAIN` (U1).
+- **One project tunnel** initially (Permanent Command §26), used by no other project. When a public staging environment exists, it gets its own tunnel, so a staging credential can never serve production traffic.
 
-## 2. Hostname scheme: two options evaluated (directive §18)
+## 2. Hostname scheme: two options evaluated (Master Directive §18; final choice deferred per ADR-008)
 
-**Option A: role subdomains per merchant.** `abc-phones.DOMAIN`, `admin-abc-phones.DOMAIN`, `finance-abc-phones.DOMAIN`
+**Option A: role subdomains per merchant.** `abc-phones.ROOT_DOMAIN`, `admin-abc-phones.ROOT_DOMAIN`, `finance-abc-phones.ROOT_DOMAIN`
 
-**Option B (recommended): one customer host per merchant, with shared staff consoles.** `abc-phones.DOMAIN` (storefront and Mini App); merchant staff use `merchant.DOMAIN` and pick the business after login.
+**Option B (recommended): one customer host per merchant, with shared staff consoles.** `abc-phones.ROOT_DOMAIN` (storefront and Mini App); merchant staff use `merchant.ROOT_DOMAIN` and pick the business after login.
 
 | Criterion | A: per-merchant role hosts | B: per-merchant storefront + shared consoles |
 |---|---|---|
@@ -35,30 +35,30 @@ Registrar (Hostinger)  →  Cloudflare nameservers  →  Cloudflare DNS (proxied
 | Operational complexity | 3× records, verification and health probes | 1× |
 | Slug namespace risk | `admin-*` and `finance-*` prefixes compete with merchant slugs | Only fixed platform names are reserved |
 
-**Recommendation: B.** Customer-facing independence is fully preserved, while the admin surface, DNS footprint and security policy stay constant as the number of merchants grows.
+**Leading candidate: B.** It preserves full customer-facing independence while keeping the admin surface, DNS footprint and security policy constant as merchants grow. The final decision is made at the domain/tenant-routing phase (ADR-008). Application code reads every hostname from configuration and the `domains` table, so either option needs no code change.
 
-## 3. Hostname map (Option B)
+## 3. Hostname map (candidate Option B)
 
 | Hostname | Routed to | Protection | Cache |
 |---|---|---|---|
-| `DOMAIN`, `www.DOMAIN` | `web-site` (company site) | Public | Yes |
-| `app.DOMAIN` | `web-customer` (platform-level runtime, future cross-merchant discovery) | Public | Static assets only |
-| `api.DOMAIN` | `api`: Telegram webhooks, payment webhooks, partner and mobile API | Public, WAF, rate limits | No |
-| `admin.DOMAIN` | `web-console` + `api` (`/api/*`) | **Cloudflare Access** (Super Admin and platform roles) + application MFA | No |
-| `finance.DOMAIN` | Same console app, finance workspace | Cloudflare Access + application MFA | No |
-| `ops.DOMAIN` | Grafana and ops tools | Cloudflare Access only (no public login page) | No |
-| `status.DOMAIN` | Status page (synthetic checks, no tenant data) | Public | Short TTL |
-| `merchant.DOMAIN` | Console app, merchant workspace (catalog, orders, staff, merchant finance) | Public login; MFA required for owner, admin and finance roles | No |
-| `media.DOMAIN` | Processed image variants (public listing media), signed URLs for private documents | Public or signed | Yes (immutable keys) |
-| `{slug}.DOMAIN` | `web-customer` (`/`) + `api` (`/api/*`, same origin) | Public, WAF, bot management | Static assets only |
-| `stg-*.DOMAIN` | Staging equivalents (e.g. `stg-api`, `stg-admin`, `stg-{slug}`) | Cloudflare Access on **all** staging hosts | No |
+| `ROOT_DOMAIN`, `www.ROOT_DOMAIN` | `web-site` (company site) | Public | Yes |
+| `app.ROOT_DOMAIN` | `web-customer` (platform-level runtime, future cross-merchant discovery) | Public | Static assets only |
+| `api.ROOT_DOMAIN` | `api`: Telegram webhooks, payment webhooks, partner and mobile API | Public, WAF, rate limits | No |
+| `admin.ROOT_DOMAIN` | `web-console` + `api` (`/api/*`) | **Cloudflare Access** (Super Admin and platform roles) + application MFA | No |
+| `finance.ROOT_DOMAIN` | Same console app, finance workspace | Cloudflare Access + application MFA | No |
+| `ops.ROOT_DOMAIN` | Grafana and ops tools | Cloudflare Access only (no public login page) | No |
+| `status.ROOT_DOMAIN` | Status page (synthetic checks, no tenant data) | Public | Short TTL |
+| `merchant.ROOT_DOMAIN` | Console app, merchant workspace (catalog, orders, staff, merchant finance) | Public login; MFA required for owner, admin and finance roles | No |
+| `media.ROOT_DOMAIN` | Processed image variants (public listing media), signed URLs for private documents | Public or signed | Yes (immutable keys) |
+| `{slug}.ROOT_DOMAIN` | `web-customer` (`/`) + `api` (`/api/*`, same origin) | Public, WAF, bot management | Static assets only |
+| `stg-*.ROOT_DOMAIN` | Staging equivalents (e.g. `stg-api`, `stg-admin`, `stg-{slug}`) | Cloudflare Access on **all** staging hosts | No |
 
 Same-origin `/api/*` on every host means no CORS, host-only cookies, and a tenant that is implied by the host.
 
 ## 4. Slugs
 
 - **Generated, never raw input.** The business name is transliterated (Amharic → Latin via a fixed table), lower-cased, and cleaned to `[a-z0-9-]`, with runs of hyphens collapsed. The result must match `^[a-z][a-z0-9-]{1,30}[a-z0-9]$`.
-- **Forbidden:** the substring `--` (which also blocks `xn--` punycode spoofing), the prefixes `stg-`, `dev-`, `test-`, `admin-`, `finance-`, `api-`, `ops-`, and the **reserved list**: `www app api admin finance ops status merchant media static cdn assets auth login sso id account billing pay payments agent sms mail smtp imap mx ns help support docs blog shop store dev staging test internal root platform arada` plus any hostname already used by another product on the same zone.
+- **Forbidden:** the substring `--` (which also blocks `xn--` punycode spoofing), the prefixes `stg-`, `dev-`, `test-`, `admin-`, `finance-`, `api-`, `ops-`, and the **reserved list**: `www app api admin finance ops status merchant media static cdn assets auth login sso id account billing pay payments agent sms mail smtp imap mx ns help support docs blog shop store dev staging test internal root platform arada`.
 - A curated list blocks brand impersonation (major brands and banks) and offensive words. A Super Admin can override it with an audit reason.
 - A slug is **unique for all time**. Archived slugs are never reissued, which prevents old links resolving to a new owner.
 - **Renaming** the business does not change the slug. Changing the slug is an explicit action: a new domain row, a 301 from the old host for 180 days, and Telegram Mini App URLs are updated.
@@ -94,7 +94,7 @@ class TunnelProvider(Protocol):
 **DNS mode (ADR-009):**
 
 - **`explicit` (default):** one proxied record per active merchant. Unknown subdomains are NXDOMAIN at the edge and never reach the origin. Suspending or archiving a merchant can remove its record.
-- **`wildcard` (scale fallback):** one proxied `*.DOMAIN` record. There are zero DNS API calls per merchant, and unknown hosts are rejected by the tenant resolver with a cached 404. Switch when record usage exceeds 80% of the zone limit, or upgrade the Cloudflare plan. Which to do is a cost decision (`14_COST_MODEL.md`).
+- **`wildcard` (scale fallback):** one proxied `*.ROOT_DOMAIN` record. There are zero DNS API calls per merchant, and unknown hosts are rejected by the tenant resolver with a cached 404. Switch when record usage exceeds 80% of the zone limit, or upgrade the Cloudflare plan. Which to do is a cost decision (`14_COST_MODEL.md`).
 
 Explicit records above the wildcard keep working in both modes, so switching is not a migration.
 
@@ -108,9 +108,9 @@ originRequest:
   connectTimeout: 10s
   noTLSVerify: false
 ingress:
-  - hostname: "DOMAIN"
+  - hostname: "ROOT_DOMAIN"
     service: http://traefik:8080
-  - hostname: "*.DOMAIN"          # every platform + merchant host; Traefik decides
+  - hostname: "*.ROOT_DOMAIN"          # every platform + merchant host; Traefik decides
     service: http://traefik:8080
   - service: http_status:404       # required catch-all
 ```
@@ -121,9 +121,9 @@ Merchant creation **never changes the tunnel config**. It adds a DNS record and 
 
 - **Entry point** `web` on `:8080`, reachable only on the internal Docker network from cloudflared. No host port is published.
 - **Routers** come from the file provider (`infra/traefik/dynamic/*.yml`). They are not discovered from Docker labels, so routing is reviewed in pull requests.
-  - `Host(admin.DOMAIN) || Host(finance.DOMAIN) || Host(merchant.DOMAIN)` → `web-console`, with `PathPrefix(/api)` → `api`
-  - `Host(api.DOMAIN)` → `api`
-  - `HostRegexp(^[a-z][a-z0-9-]{1,30}[a-z0-9]\.DOMAIN$)` with `PathPrefix(/api)` → `api`; otherwise → `web-customer`
+  - `Host(admin.ROOT_DOMAIN) || Host(finance.ROOT_DOMAIN) || Host(merchant.ROOT_DOMAIN)` → `web-console`, with `PathPrefix(/api)` → `api`
+  - `Host(api.ROOT_DOMAIN)` → `api`
+  - `HostRegexp(^[a-z][a-z0-9-]{1,30}[a-z0-9]\.ROOT_DOMAIN$)` with `PathPrefix(/api)` → `api`; otherwise → `web-customer`
   - **Default (priority 1):** return 404 through a static `noop@internal` service with an error page. **An unmatched host or path never reaches any application.**
 - **Middlewares:**
   - Security headers: HSTS, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, and CSP set per bundle.
@@ -142,7 +142,7 @@ Merchant creation **never changes the tunnel config**. It adds a DNS record and 
 | Minimum TLS | 1.2 |
 | WAF | Managed rules on. Custom rules: block non-`POST` requests on webhook paths; geo and ASN rules for `admin.`/`finance.` if desired. |
 | Rate limiting | `/api/v1/auth/*`: per IP. Webhooks: per route key. |
-| Bot protection | Bot Fight Mode on storefront hosts, **off** for `api.DOMAIN` webhook paths (Telegram and providers are bots) |
+| Bot protection | Bot Fight Mode on storefront hosts, **off** for `api.ROOT_DOMAIN` webhook paths (Telegram and providers are bots) |
 | Access applications | `admin.`, `finance.`, `ops.`, `stg-*`. Identity: one-time PIN or IdP, with an allow-list of emails. |
 | Caching | Cache static assets on `{slug}`, `app`, `media`. Bypass `/api/*` and all console hosts. |
 | DNSSEC | On (DS record at Hostinger) |
@@ -151,6 +151,6 @@ Merchant creation **never changes the tunnel config**. It adds a DNS record and 
 
 1. **No `ports:` mapping** in any production compose file; CI fails on one. Internal services use `expose` only. This matters because Docker-published ports bypass host firewalls such as UFW.
 2. **Host firewall:** default-deny inbound. Management SSH is reachable only over a private overlay (WireGuard or Tailscale) or through Cloudflare Access for Infrastructure. It is never world-open.
-3. **PostgreSQL, Redis, the object store, Prometheus and Grafana** listen only on internal Docker networks. Grafana is reachable only through `ops.DOMAIN` behind Access.
+3. **PostgreSQL, Redis, the object store, Prometheus and Grafana** listen only on internal Docker networks. Grafana is reachable only through `ops.ROOT_DOMAIN` behind Access.
 4. **An external scan** (nmap from outside) of every VM's public address, if the VM has one, shows **no open ports**. This check is part of the deployment acceptance tests.
 5. **DNS:** no A or AAAA record for any origin address, and the zone is audited for records not pointing to the tunnel.

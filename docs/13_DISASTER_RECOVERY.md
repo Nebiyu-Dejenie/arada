@@ -1,6 +1,6 @@
 # 13 — Disaster Recovery
 
-Status: **Proposed; backup destination blocked on Q5** · Phase 1 (backups and restore drill are Phase 1 exit criteria)
+Status: **Proposed; the off-host backup destination is UNKNOWN (U3, blocking at the first deployment that holds real data)** · Phase 1 builds the tooling and local restore verification; off-host backups start with the first real deployment. A backup that has never been restored is not considered proven (Permanent Command §43).
 
 ## 1. Objectives
 
@@ -23,7 +23,7 @@ The ledger is the asset that matters most. **A lost payment record is worse than
 | Secrets | KEK, backup cipher key, tunnel credentials, Cloudflare token: **escrowed offline** (password manager + sealed paper copy in two locations) | on rotation | current + previous | ✓ |
 | Cloudflare zone config | Terraform state (encrypted remote state in the ops repo or an off-site bucket) | on change | versioned | ✓ |
 
-**Off-site** means a different physical site and failure domain from VM-DATA: a second location or NAS, or an encrypted S3-compatible bucket with a third-party provider. The choice is **Q5**. A backup on the same disk or box **does not count** (lesson `00` §6.3).
+**Off-host** means a different physical host and failure domain from the database host: a second location or NAS, or an encrypted S3-compatible bucket with a third-party provider. The choice is UNKNOWN (**U3**). A backup on the same disk or box **does not count** (lesson `00` §6.3).
 
 ## 3. Automated restore verification
 

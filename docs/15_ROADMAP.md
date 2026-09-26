@@ -1,43 +1,40 @@
 # 15 — Roadmap
 
-Status: **Proposed** · Directive §91 · Each phase has an **exit gate** (acceptance tests in `19`). No phase starts until the previous gate passes and the decisions it depends on are made.
+Status: **Accepted phase order** (ADR-027, Permanent Command §55) · Each phase ends at an **exit gate**, made of acceptance tests in `19` plus the quality gates in Permanent Command §31. A phase starts only when the previous gate passes and the unknowns that block it are resolved (`20` §2).
 
 ## Phase overview
 
-| Phase | Name | Delivers | Depends on decisions | Exit gate (summary) |
+| Phase | Name | Builds | Blocked by (from `20` §2) | Exit gate (summary) |
 |---|---|---|---|---|
-| **0** | Architecture discovery | This document set | — | **Owner approval of the architecture + answers to Q1–Q9** ← *we are here* |
-| **1** | Foundation | Repo skeleton, CI with all security gates, compose (dev/staging), Postgres + RLS framework, migrations, Redis, `RequestContext`, identity (staff), scoped RBAC, tenancy (manual tenant create), audit, outbox/inbox, observability stack, backups + restore verification | Q4 (hosts), Q5 (backup), Q6 (stack) | Isolation suite green; RLS policy check; restore drill passes; alert reaches Ops chat; origin scan clean on staging |
-| **2** | Blueprint engine | Attribute library, blueprint versions (draft → publish), meta-schema, JSONLogic rules, compiler, runtime manifest, workflow runtime, **Phones v1.0** seed, version migrations (preview/apply/rollback) | — | Phones v1.0 → v1.1 compatible upgrade; v2.0 breaking migration with rollback; tenant pinned on v1.0 unaffected |
-| **3** | Merchant provisioning | Business Factory saga, `edge` module + Cloudflare DNS provider, domain verification, plans/entitlements, tenant lifecycle, Super Admin console shell | **Q1 (domain), Q3 (hostnames)**, Cloudflare API token | Create Merchant A and B from one blueprint with **zero manual DNS**; each gets a verified host |
-| **4** | Telegram bot + Mini App | Factory bot, managed-bot provisioning, webhook multiplexer, `initData` auth (HMAC + Ed25519), customer bundle shell, deep links | **Q7 (bot ownership)** | Tenant A's `initData` rejected on tenant B; managed bot created and rotated; Mini App loads branded per tenant |
-| **5** | Catalog + search | Listings, variants, media pipeline, inventory, category trees, PG FTS + attribute filters behind `SearchPort`, storefront browse | — | Filters on blueprint attributes; media validation; search never crosses tenants |
-| **6** | Orders | Cart, checkout (re-pricing), inventory reservation, order state machine via blueprint workflow, cancellations | — | Concurrent-checkout test; invalid transitions rejected |
-| **7** | Payments | Intent state machine, provider adapters (first: per Q8), webhooks, poller, refunds, reconciliation v1 | **Q8 (providers + settlement model + legal)** | Full `07` §8 matrix green against provider sandboxes |
-| **8** | Ledger + finance | Ledger with DB invariants, posting rules, commission engine, merchant/vertical/platform finance portals, payouts (if Model C), period close | Q8 | Trial balance 0; rebuild matches; commission snapshot immutable under rule change |
-| **9** | Notifications | Templates, Telegram channel with rate limiting, SMS/email adapters, preferences | SMS provider choice | Order lifecycle notifications per tenant, localized |
-| **10** | Reviews + promotions | Eligibility-gated reviews, coupons, discounts, flash sales, referral engine | — | Duplicate/ineligible review blocked; referral self-attribution blocked |
-| **11** | Delivery + support | Zones, pricing, courier app (Mini App), proof of delivery, tickets, disputes | — | Proof-of-delivery required for `delivered`; dispute blocks payout |
-| **12** | AI | Gateway, tool registry, budgets, shopping agent (structured intent, Amharic), merchant assistant, listing generator, Super Admin copilot | Model provider choice | Tool authz tests; no financial action without human confirmation; budget exhaustion degrades gracefully |
-| **13** | Analytics + trust/risk | Event facts, KPI definitions from blueprints, dashboards, trust signals (documented methodology), risk signals + review queue | — | Tenant analytics isolated; risk produces signals, not silent penalties |
-| **14** | Advertising | Placements, sponsored search, ad billing via ledger | — | Ads revenue account; sponsored results labelled |
-| **15** | Additional verticals | Computers, Electronics, Fashion, Furniture, Cars, Spare Parts, Property (res/com), Services, Food, Beauty, Education, Construction, Agriculture, Jobs, Courses, Events: blueprint YAML + extensions each | — | Each vertical: create 2 merchants, run core flows, no core code change (only `extensions/` + `blueprints/`) |
+| **0** | Discovery | Architecture package, charter, ADRs, question register | — | Owner go-ahead (**B1**) ← *we are here* |
+| **1** | Foundation | Project structure, typed configuration, database foundation (schemas, roles, RLS, migrations, outbox/inbox), identity, tenancy, RBAC, audit, feature flags, **blueprint foundation**, merchant model; plus the enabling baseline: CI gates, local compose, observability, backup tooling | B1 (and A1 confirmed or not overridden) | ISO suite green; RLS policy lint; migration tests; blueprint publish/pin/immutability tests; an alert reaches the Ops channel locally; backup + restore verification on local compose |
+| **2** | Telegram foundation | Bot integration (BYO token first; managed bots after U6 is verified), webhook multiplexer, Mini App `initData` authentication (HMAC + Ed25519), host-based tenant routing, deep links, notification foundation (Telegram channel, templates, rate limits) | U5, U6 | AUTH-1…5, ISO-4, ISO-8; webhook dedupe; per-bot rate limiting; Mini App shell renders a per-tenant manifest |
+| **3** | Commerce core | Catalog and listings (blueprint attributes, media pipeline), search (FTS + trigram + filters), customers, cart, checkout (server re-pricing, reservation), orders (core lifecycle + blueprint workflow), reviews (eligibility-gated), notifications for the order lifecycle | U7 (media storage), U8 (SMS/email, if used) | FIN-10 concurrent checkout; BP-3/4/5; ISO-9; review eligibility tests |
+| **4** | Payment + finance | Payment abstraction, provider adapters, payment intents, webhooks, poller, double-entry ledger, posting rules, commissions, refunds, reconciliation, payout architecture | **U4** | Full FIN-1…17 against provider sandboxes; trial balance 0; rebuild equals cache |
+| **5** | Reference vertical (Phones, A3) | Production-grade Phones blueprint with IMEI extension; Mini App, merchant portal, finance portal and analytics end to end; first real tenant(s) created through the provisioning service (CLI or admin endpoint) | U1, U2, U3 (first real deployment) | SC-1 criteria met *without* the factory UI; production smoke tests; DR-1 passes on real infrastructure |
+| **6** | Merchant Factory | Automated Create-Business saga, blueprint cloning and migrations (preview/apply/rollback), branding, Telegram (managed bots), Mini App verification, payment configuration, features, **domain provisioning (ADR-008/009 decided here)**, activation | U1 (Cloudflare token) | SC-1, SC-2, SC-3, SC-4 fully automated; EDGE-5…7 |
+| **7** | Vertical expansion | The remaining 17 verticals as blueprints + extensions + workflows, prioritised by the business | — | SC-5 for each vertical: no core changes outside `blueprints/` and `extensions/` |
+| **8** | Advanced platform | Delivery engine, trust, fraud/risk signals, AI gateway (shopping agent, merchant assistant, listing generator, copilot, Amharic intent), advertising, loyalty/promotions/referrals, advanced analytics, recommendations | U8 | AI-1…4; referral and fraud tests; delivery proof-of-delivery tests |
+| **9** | Scale | Only on metrics: dedicated search, event streaming, database replicas, service extraction, HA, Kubernetes | Measured triggers | Documented measurements that justify each step, recorded as ADRs |
 
-Phases 9–14 can partly overlap once Phase 8 is complete. Phases 1–8 are strictly sequential, because each depends on the invariants of the previous one.
+Phases 1–4 are strictly sequential, because each depends on the previous phase's invariants. Phases 7 and 8 may overlap once Phase 6 passes.
 
-## Phase 1 — detailed task list (to start after approval)
+## Phase 1: Foundation task list (starts on B1)
 
-1. **Repo & tooling**: backend package skeleton (`kernel/`, `control/`, …), frontend pnpm workspace, pre-commit (ruff, mypy, gitleaks, prettier, eslint), import-linter contracts for module boundaries.
-2. **CI**: GitHub Actions per `11` §5 with all gates from `09` §11 blocking from day one; no-`ports:` check; RLS-policy check; vertical-literal grep check.
-3. **Compose**: `dev` (all services), `staging` template, `prod` template; isolated networks; host-unique names; healthchecks; resource limits from `11` §3.
-4. **Kernel**: `Money`, UUIDv7, `RequestContext`, error model (RFC 9457), idempotency middleware, `SET LOCAL` DB session, data-plane router (single plane initially), outbox writer + dispatcher + inbox, leader lock, structured logging with redaction, OTel.
-5. **Schemas & roles**: `control`, `commerce`, `finance`, `ops` schemas; DB roles (`06` §2); RLS helper for migrations; CI policy check.
-6. **Identity (staff)**: persons, identities, passkeys + password/TOTP, sessions (`__Host-` cookies), CSRF, step-up, device management, brute-force protection.
-7. **RBAC**: catalogue, system roles, scoped assignments, `authorize`, JIT access grants, single-operator mode.
-8. **Tenancy**: organizations, tenants, merchants, placement, lifecycle commands, host resolution (with the `domains` table, manual entries for now).
-9. **Audit**: append-only, partitioned, with before/after diffs.
-10. **Observability**: collector, Prometheus, Loki, Tempo, Grafana (Access-protected), Alertmanager → Ops Telegram chat; first dashboards and alerts from `12` §6.
-11. **Backups**: pgBackRest to the Q5 destination, weekly automated restore verification, first manual drill.
-12. **Infra as code**: Ansible roles (base hardening, Docker, firewall default-deny, WireGuard, cloudflared, deploy), Terraform for Cloudflare zone settings + Access apps (staging).
-13. **Tests**: isolation suite framework (auto-enumerates endpoints), auth tests, migration tests, a first cross-tenant attack battery.
-14. **Staging go-live** behind Cloudflare Access on `stg-*` hostnames; external origin scan.
+Every item meets the Definition of Done at foundation level: tests, typing, lint, migration check, security scan, tenant-isolation check, observability hooks and documentation.
+
+1. **Project structure.** Backend package (`kernel/`, `control/`, `commerce/`, `finance/`, `engagement/`, `intelligence/`, `extensions/`, `entrypoints/`); frontend pnpm workspace skeleton; import-linter contracts for module boundaries.
+2. **Configuration.** Typed settings (pydantic-settings) with `ROOT_DOMAIN` and all hostnames as configuration; environment tagging (`dev`/`staging`/`production`) enforced at start-up; a secret-provider interface (no secrets in env files committed).
+3. **CI.** Lint, type check, unit and integration tests on real Postgres/Redis, migration tests, gitleaks, pip-audit, Semgrep/Bandit, Trivy (filesystem), a no-`ports:` check, an RLS-policy lint and a vertical-literal lint. All blocking.
+4. **Local compose.** Postgres, Redis, api, worker, scheduler and the observability stack. Isolated networks, host-unique names, health checks. Resource requests stay **TBD** until measured (`11` §3).
+5. **Database foundation.** Schemas `control`/`commerce`/`finance`/`ops`; database roles; RLS helpers; the `SET LOCAL` session; the data-plane router (single plane); outbox dispatcher + inbox; idempotency-key store; leader lock.
+6. **Kernel.** `Money`, UUIDv7, `RequestContext`, RFC 9457 errors, request-id and trace propagation, log redaction.
+7. **Identity.** Persons, identities, staff authentication (passkey + password/TOTP), sessions, CSRF, step-up, brute-force protection.
+8. **Tenancy + merchant model.** Organizations, tenants, merchants, placement, lifecycle commands, host resolution against the `domains` table (local `*.localhost` hosts only).
+9. **RBAC.** Permission catalogue (charter names: `products.*`, `orders.*`, `payments.*`, `finance.*`, `users.*`, `staff.*`, `blueprints.*`, `tenants.*`), scoped roles, `authorize`, JIT grants, single-operator mode.
+10. **Audit.** Append-only, partitioned, with actor, tenant, action, resource, request_id, trace_id, before/after, reason and source.
+11. **Feature flags.** Platform → vertical → tenant layering, with evaluation cached by config version.
+12. **Blueprint foundation.** Attribute library, blueprints, versions (draft → publish, immutable), meta-schema validation, JSONLogic evaluator (server), compiler, tenant pinning, and a *test* blueprint. The production Phones blueprint comes in Phase 5; version migrations in Phase 6.
+13. **Observability baseline.** OTel SDK, collector, Prometheus, Loki, Grafana and Alertmanager on local compose, with first dashboards and a test alert.
+14. **Backup tooling.** pgBackRest configuration and restore-verification job against a local repository. The off-host destination is plugged in at U3.
+15. **Isolation test framework.** Auto-enumerates tenant-scoped endpoints and runs cross-tenant attacks. It gates every PR from day one.

@@ -1,6 +1,6 @@
 # 11 — Deployment, Provisioning and Environments
 
-Status: **Proposed; host topology blocked on Q4 (which machines)** · Related: ADR-001, ADR-010, ADR-020
+Status: **Proposed; machines are UNKNOWN (U2, blocking at the first staging or production deployment)** · Related: ADR-001, ADR-010, ADR-020, ADR-027
 
 ## 1. Principles
 
@@ -14,70 +14,63 @@ Status: **Proposed; host topology blocked on Q4 (which machines)** · Related: A
 
 ## 2. Topology
 
-### Stage 1 (launch): 2 VMs + off-site backup target
+The **actual topology depends on the machines the owner provides** (U2), which are unknown and are not guessed (Permanent Command §25, §52). The design fixes the **roles and boundaries**, so any machine count from one upward can host them:
 
 ```
-VM-APP  (edge + compute)                 VM-DATA  (state)
- ├─ cloudflared                           ├─ postgres (primary)
- ├─ traefik                               ├─ pgbouncer
- ├─ api ×2                                ├─ redis
- ├─ worker ×2                             ├─ object store (S3 API)
- ├─ scheduler ×1 (leader lock)            └─ pgbackrest → OFF-SITE repo (encrypted)
- ├─ web-customer / web-console / web-site
- └─ otel-collector, promtail/alloy        VM-OBS (may be co-located on VM-DATA at launch)
-                                           ├─ prometheus, alertmanager
-                                           ├─ loki, tempo
-                                           └─ grafana
+EDGE role        cloudflared (one project tunnel) → traefik
+APP role         api · worker · scheduler (leader lock) · web-customer / web-console / web-site
+DATA role        postgres (+ pgbouncer) · redis · object store (S3 API) · pgbackrest → OFF-HOST repo (encrypted)
+OBS role         otel-collector · prometheus · alertmanager · loki · grafana (tempo later)
 ```
 
-- VM-APP ↔ VM-DATA communicate over a **private network**: a LAN VLAN or a WireGuard overlay. Nothing is exposed publicly.
-- One Docker network per concern (`edge`, `app`, `data`, `obs`), with **host-unique container names** (lesson from `00` §6.2).
+| Machines available | Placement |
+|---|---|
+| 1 | All roles on one host. Acceptable for staging. For production it is acceptable only with off-host backups and a tested restore. |
+| 2 | EDGE + APP on one, DATA + OBS on the other (the state tier is separated first) |
+| 3–5 | Follows the Permanent Command §25 pattern: edge; api/workers/bots; PostgreSQL; Redis/search; monitoring/backup |
 
-### Stage 2 (growth): add resilience before scale
+Rules that hold in every placement:
 
-- A Postgres **streaming replica** on a third VM (hot standby, for read-only reporting and failover).
-- A second VM-APP, with cloudflared running on both. Cloudflare load-balances between tunnel replicas.
-- Dedicated worker VM(s) for image processing and AI jobs.
+- Hosts talk over a **private network** (LAN VLAN or WireGuard overlay). Nothing is exposed publicly.
+- One Docker network per concern (`edge`, `app`, `data`, `obs`), with **host-unique container names** (lesson `00` §6.2).
 
-### Stage 3: enterprise isolation
+Later stages happen **only on measured need** (Phase 9):
 
-A dedicated Postgres VM per enterprise tenant (placement, `02` §3) and optionally dedicated `api`/`worker` containers, which Traefik routes to by tenant host.
+- a Postgres streaming replica
+- a second APP host with a second `cloudflared` replica
+- dedicated worker hosts
+- per-enterprise-tenant database hosts (placement, `02` §3)
 
-## 3. Service catalogue (directive §21): initial sizing, to be validated by load tests
+## 3. Service catalogue (Master Directive §21): every service declares its requirements
 
-| Service | CPU (req → limit) | RAM (req → limit) | Storage | Network | Health check | Restart | Depends on |
+The **values are TBD**. They come from measurement: the Phase 1 local profile, then Phase 5 load tests on the real machines. They are never estimated in advance (Permanent Command §25). Each compose service must declare `cpus` and `mem_limit` (and reservations) once measured. CI fails on a production service without them, from the first real deployment onwards.
+
+| Service | CPU | RAM | Storage | Network | Health check | Restart | Depends on |
 |---|---|---|---|---|---|---|---|
-| cloudflared | 0.1 → 0.5 | 64 → 256 MB | — | outbound 443 to Cloudflare; `edge` | `/ready` on metrics port | always | traefik |
-| traefik | 0.2 → 1 | 128 → 512 MB | — | `edge`, `app` | `/ping` | always | — |
-| api (each) | 0.5 → 2 | 512 MB → 1.5 GB | — | `app`, `data` | `/healthz` (process), `/readyz` (DB + Redis) | always | pgbouncer, redis, migrate✓ |
-| worker (each) | 0.5 → 2 | 512 MB → 2 GB | tmp 2 GB (image processing) | `app`, `data`, outbound (Telegram, providers) | heartbeat row + `/healthz` | always | pgbouncer, redis, object store |
-| scheduler | 0.2 → 1 | 256 → 512 MB | — | `app`, `data` | leader heartbeat | always | pgbouncer, redis |
-| migrate (job) | 0.5 | 512 MB | — | `data` | exit 0 | no | postgres |
-| web-* (static) | 0.1 → 0.5 | 64 → 128 MB | — | `app` | `/` 200 | always | — |
-| postgres | 2 → 4 | 4 → 8 GB (shared_buffers ≈25%) | **100 GB SSD** + growth; WAL on the same or a separate volume | `data` | `pg_isready` | always | — |
-| pgbouncer | 0.2 → 0.5 | 64 → 128 MB | — | `data` | `SHOW POOLS` | always | postgres |
-| redis | 0.2 → 1 | 512 MB → 1 GB (`maxmemory` + `allkeys-lru` for cache DB; `noeviction` for queue/lock DB) | AOF 5 GB | `data` | `PING` | always | — |
-| object store | 0.5 → 1 | 512 MB → 1 GB | **200 GB+** (grows with media) | `data` | `/minio/health/ready` or equivalent | always | — |
-| otel-collector | 0.2 → 0.5 | 256 → 512 MB | — | `obs`, `app` | `/` (health extension) | always | — |
-| prometheus | 0.5 → 1 | 1 → 2 GB | 50 GB (30 d retention) | `obs` | `/-/ready` | always | — |
-| loki | 0.5 → 1 | 512 MB → 1 GB | 50 GB (14–30 d) | `obs` | `/ready` | always | — |
-| tempo | 0.2 → 0.5 | 512 MB → 1 GB | 20 GB (7 d) | `obs` | `/ready` | always | — |
-| grafana | 0.2 → 0.5 | 256 → 512 MB | 1 GB | `obs`, `edge` (via Access only) | `/api/health` | always | prometheus, loki, tempo |
+| cloudflared | TBD | TBD | — | outbound 443 to Cloudflare; `edge` | `/ready` on metrics port | always | traefik |
+| traefik | TBD | TBD | — | `edge`, `app` | `/ping` | always | — |
+| api | TBD per replica | TBD | — | `app`, `data` | `/healthz` (process), `/readyz` (DB + Redis) | always | pgbouncer, redis, migrate✓ |
+| worker | TBD per replica | TBD | temp space for image processing: TBD | `app`, `data`, outbound (Telegram, providers) | heartbeat row + `/healthz` | always | pgbouncer, redis, object store |
+| scheduler | TBD | TBD | — | `app`, `data` | leader heartbeat | always | pgbouncer, redis |
+| migrate (job) | TBD | TBD | — | `data` | exit 0 | no | postgres |
+| web-* (static) | TBD | TBD | — | `app` | `/` returns 200 | always | — |
+| postgres | TBD | TBD (`shared_buffers` tuned to the measured RAM) | TBD (growth tracked by `14` §3 meters) | `data` | `pg_isready` | always | — |
+| pgbouncer | TBD | TBD | — | `data` | `SHOW POOLS` | always | postgres |
+| redis | TBD | TBD (`maxmemory` set; `allkeys-lru` for cache DB, `noeviction` for queue/lock DB) | AOF: TBD | `data` | `PING` | always | — |
+| object store | TBD | TBD | TBD (grows with media) | `data` | product health endpoint | always | — |
+| otel-collector | TBD | TBD | — | `obs`, `app` | health extension | always | — |
+| prometheus | TBD | TBD | TBD (retention per `12`) | `obs` | `/-/ready` | always | — |
+| loki | TBD | TBD | TBD (retention per `12`) | `obs` | `/ready` | always | — |
+| grafana | TBD | TBD | TBD | `obs`, `edge` (Access only) | `/api/health` | always | prometheus, loki |
 
-**Launch minimums:**
-
-- VM-APP: 4 vCPU, 8 GB RAM, 60 GB SSD.
-- VM-DATA (+ OBS co-located): 4–8 vCPU, 16 GB RAM, 500 GB SSD.
-- An off-site backup repository of at least 2× the database size, plus media.
-
-These are estimates. Phase 1 exit criteria include a load test that replaces them with measurements (`14` §3).
+**How the values get filled:** the Phase 1 local profile (`docker stats` under the test suite and a synthetic load), then k6 load tests on the real machines at Phase 5. The results are recorded in this table and in an ADR.
 
 ## 4. Environments (directive §64)
 
 | | dev | staging | production |
 |---|---|---|---|
-| Where | Developer machine (compose) | Separate VM, or a separate compose project on a separate host from prod | VM-APP + VM-DATA |
-| Hostnames | `*.localhost` | `stg-*.DOMAIN` behind Cloudflare Access | `DOMAIN` hostnames (`05` §3) |
+| Where | Developer machine (compose) | Separate host(s) from production (U2) | Production host(s) per §2 placement (U2) |
+| Hostnames | `*.localhost` | `stg-*.ROOT_DOMAIN` behind Cloudflare Access | `ROOT_DOMAIN` hostnames (`05` §3) |
 | Tunnel | none | **Own tunnel** | Own tunnel |
 | Database | Ephemeral, seeded | Own database; anonymised copy of prod refreshed monthly (PII scrubbed) | Production |
 | Payments | Provider **sandbox** credentials only | Sandbox only | Live |
@@ -147,7 +140,7 @@ The Super Admin tenant page shows computed, never self-reported, status:
 Tenant: ABC Phones     Deployment: READY    Release: 2026.10.1 (ring 2)
 Health: HEALTHY        Bot: CONNECTED       Mini App: HEALTHY (main app verified)
 API: HEALTHY           Database: HEALTHY (placement: shared/starter)
-Payment: CONNECTED (chapa, split, last reconcile 100%)     Domain: ACTIVE (abc-phones.DOMAIN)
+Payment: CONNECTED (chapa, split, last reconcile 100%)     Domain: ACTIVE (abc-phones.ROOT_DOMAIN)
 ```
 
 ## 8. Staged rollout (directive §86)

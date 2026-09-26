@@ -75,7 +75,7 @@ Webhook paths accept `POST` only (WAF rule and app check). Bodies are limited to
 
 - TLS terminates at Cloudflare (Full-strict), and the tunnel is encrypted to the origin.
 - Headers: HSTS, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy` (minimal), and `frame-ancestors` restricted. The customer bundle allows Telegram's WebView embedding; the console allows `'none'`.
-- **CSP** per bundle: `default-src 'self'`, no inline scripts (hashed only), images from `self` and `media.DOMAIN`, and `connect-src` to `self` only.
+- **CSP** per bundle: `default-src 'self'`, no inline scripts (hashed only), images from `self` and `media.ROOT_DOMAIN`, and `connect-src` to `self` only.
 - **Merchant-supplied rich text** (descriptions) is sanitised to an allow-list of tags with a server-side sanitiser, and rendered without `dangerouslySetInnerHTML` except through the sanitised path.
 
 ## 8. File and media pipeline (directive §56)
@@ -87,7 +87,7 @@ Webhook paths accept `POST` only (WAF rule and app check). Bodies are limited to
    - image re-encoding strips EXIF and GPS data and neutralises polyglot files
    - PDFs are checked with a sanitiser and a ClamAV scan
 3. The worker writes variants (`thumb`, `card`, `full`, WebP) to `t/{tenant}/media/{asset_id}/{variant}` with immutable keys, and deletes the quarantine object.
-4. Public listing images are served via `media.DOMAIN` (cached). Private documents (IDs, contracts, delivery proofs) use **signed GET URLs** with a 5-minute lifetime, after an authorization check.
+4. Public listing images are served via `media.ROOT_DOMAIN` (cached). Private documents (IDs, contracts, delivery proofs) use **signed GET URLs** with a 5-minute lifetime, after an authorization check.
 5. Filenames are never used as keys. The original name is stored as metadata, and sanitised for display only.
 
 ## 9. AI security (directive §40–43, §89)

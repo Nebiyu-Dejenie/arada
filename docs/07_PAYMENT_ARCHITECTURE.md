@@ -1,6 +1,6 @@
 # 07 — Payment Architecture
 
-Status: **Proposed; the settlement model is blocked on Q8 (provider contracts and legal review)** · Related: ADR-013, ADR-015 · Phase 7
+Status: **Proposed; the final settlement model is UNKNOWN until provider contracts and legal review (U4, blocking at Phase 4)** · Related: ADR-013, ADR-015 · Phase 4
 
 **Payment state is not accounting state** (directive §96). `payments` tracks what a provider says happened. `ledger` (`08`) records what it means financially. They are linked by events and reconciled daily.
 
@@ -12,7 +12,7 @@ The architecture therefore supports three **settlement models**, chosen per paym
 
 | Model | Money flow | Platform's legal exposure | Default |
 |---|---|---|---|
-| **A. Direct** | The customer pays the **merchant's own** provider account. The platform invoices its commission separately. | Lowest; the platform is a software provider | **Default until Q8 is resolved** |
+| **A. Direct** | The customer pays the **merchant's own** provider account. The platform invoices its commission separately. | Lowest; the platform is a software provider | **Default until U4 is resolved** (ADR-015) |
 | **B. Split** | The provider splits at source: the merchant's share goes to the merchant's sub-account and the commission goes to the platform's account (where the provider supports sub-accounts or split settlement, per contract) | Low to medium; confirm with the provider and counsel | Preferred once contracted |
 | **C. Platform collect** | The customer pays the platform, and the platform pays out to merchants | **High:** likely requires a licence, or operating under a licensed partner | Only with written legal clearance; a feature flag guards it |
 
@@ -20,7 +20,7 @@ The ledger records every model faithfully (`08` §5), so changing model later is
 
 ## 2. Provider interface
 
-A generalisation of the proven Bingo protocol:
+A normalised internal interface; provider-specific fields never leave the adapter (Permanent Command §15):
 
 ```python
 class PaymentProvider(Protocol):
@@ -38,7 +38,7 @@ class PaymentProvider(Protocol):
 - `ProviderConfig` carries **decrypted credentials for one merchant or platform configuration**. It exists only in memory, for the duration of the call.
 - `CheckoutRequest` uses the `Money` type (`amount_minor`, `currency`). Adapters convert to the provider's format at the boundary and verify the round trip.
 - Adapters are written against each provider's current official documentation and contract, and each adapter has a **contract test suite** replaying recorded sandbox exchanges.
-- Candidate adapters, subject to contracts (Q8): Telebirr (merchant API), Chapa, SantimPay, ArifPay, CBE Birr, M-PESA Ethiopia, and manual/bank transfer with proof upload and staff verification.
+- Candidate adapters, subject to contracts (U4): Telebirr (merchant API), Chapa, SantimPay, ArifPay, CBE Birr, M-PESA Ethiopia, and manual/bank transfer with proof upload and staff verification.
 
 ## 3. Payment intent state machine
 
@@ -64,7 +64,7 @@ created ──► pending ──► succeeded ──► partially_refunded ─�
 
    All of this happens in **one transaction**.
 3. The server calls `create_checkout` (outside the database transaction) and stores the `payment_attempt` with `provider_ref`. It returns the checkout URL or instructions.
-4. The customer pays in the provider flow. The provider sends a callback to `api.DOMAIN/pay/wh/{provider}/{config_key}`.
+4. The customer pays in the provider flow. The provider sends a callback to `api.ROOT_DOMAIN/pay/wh/{provider}/{config_key}`.
 5. **Webhook processing:**
    1. Verify the signature using that configuration's credentials. Failure returns 401 and increments a metric.
    2. `INSERT INTO finance.provider_events … ON CONFLICT (provider, provider_event_id) DO NOTHING`. A duplicate returns 200 with no further effect.
@@ -89,7 +89,7 @@ created ──► pending ──► succeeded ──► partially_refunded ─�
 | Intent | `UNIQUE (tenant_id, idempotency_key)` | One intent per checkout attempt |
 | Provider call | `our_ref = intent.ref` sent as the provider's merchant reference | Providers that dedupe by reference will not double-charge |
 | Callback | `UNIQUE (provider, provider_event_id)`. If a provider lacks an event id, use a hash of the canonical payload plus the provider reference. | Five identical callbacks produce one effect |
-| Ledger | `ledger_transactions.idempotency_key UNIQUE` (e.g. `pay:<intent_id>:captured`), and a conflict with a different `kind` raises an error (a lesson carried over from the Bingo ledger audit) | Money is posted exactly once |
+| Ledger | `ledger_transactions.idempotency_key UNIQUE` (e.g. `pay:<intent_id>:captured`), and a conflict with a different `kind` raises an error (otherwise a replayed key could report money as moved when it never was) | Money is posted exactly once |
 | Consumers | `ops.inbox (consumer, event_id)` | Each event handler runs once per consumer |
 
 ## 6. Refunds

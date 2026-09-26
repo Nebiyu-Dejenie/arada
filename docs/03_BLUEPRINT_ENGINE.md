@@ -1,6 +1,6 @@
 # 03 — Blueprint Engine
 
-Status: **Proposed** · Related: ADR-006, ADR-007 · Phase 2
+Status: **Proposed** · Related: ADR-006, ADR-007, ADR-028 · Phases: foundation (versions, publish, pinning, rules) in **1**; order workflows in **3**; production Phones blueprint in **5**; version migrations in **6**; other verticals in **7**
 
 The blueprint engine is the scalability engine. **A new vertical is new data, not new code**, except for genuinely unique logic, which lives in registered extensions (§8).
 
@@ -36,6 +36,7 @@ The blueprint engine is the scalability engine. **A new vertical is new data, no
 | Custom entities | `commerce.entity_records(tenant_id, id, entity_key, blueprint_version_id, schema_rev, data jsonb, workflow_state, …)` |
 | Filterable / sortable attributes | A typed projection, `commerce.attribute_values(tenant_id, record_type, record_id, attr_key, num_value numeric, text_value text, bool_value bool, date_value timestamptz, geo point)`, with B-tree indexes per value column prefixed by `(tenant_id, attr_key)`. The catalog module maintains it transactionally on every write. |
 | Full-text search | `commerce.listings.search_doc tsvector` (weighted: title A, key attributes B, description C), built from the blueprint's `search.fields` |
+| Fuzzy / typo-tolerant search | `pg_trgm` GIN indexes on a normalised `search_text` (title, brand, model, plus Latin transliteration of Amharic text), so `samsng`, `ሳምሰንግ` and `Samsung` all match (ADR-018) |
 
 Why this model:
 
@@ -143,6 +144,23 @@ extensions: [imei.luhn]
 
 A Cars blueprint uses the **same engine** with a different definition: entities `vehicle`, `inspection`, `inquiry` and `test_drive`; attributes `make`, `model`, `year`, `mileage` (measurement), `transmission`, `fuel`, `engine_cc`, `vin` (extension `vin.checkdigit`) and `condition`; `commerce.checkout_modes: [inquiry_only, deposit]`; and an inquiry workflow `new → contacted → test_drive_scheduled → negotiation → sold | lost`.
 
+## 5a. Core order lifecycle vs vertical workflow (Permanent Command §17)
+
+Vertical workflows must never corrupt the core order model, so an order carries **two separate state fields**:
+
+| Field | Owner | Values | Changed by |
+|---|---|---|---|
+| `orders.status` | Platform (`orders` module) | `created → pending_payment → paid → in_progress → completed`, plus `cancelled`. Inquiry-only verticals skip payment: `created → in_progress → completed` / `cancelled`. | Platform commands and events only, such as `PaymentCompleted` → `paid`. Every transition is deterministic and validated. |
+| `orders.workflow_state` | Blueprint workflow | Vertical steps, e.g. retail `confirmed → processing → ready → shipped → delivered`, or property `inquiry → viewing_requested → viewing_completed → offer → negotiation → contract` | Workflow transitions with permission and JSONLogic guards |
+| `orders.payment_status` | `payments` module (via events) | Mirrors the payment intent: `none`, `pending`, `succeeded`, `partially_refunded`, `refunded`, `failed` | Payment events only |
+
+**Coupling rules, enforced by the workflow compiler:**
+
+- A workflow declares which of its states map to the core `in_progress` or `completed`.
+- A workflow state marked `requires_payment` cannot be entered unless `payment_status = succeeded`, when the checkout mode is prepaid.
+- Reaching a state mapped to `completed` sets `orders.status = completed`, which creates review eligibility and starts payout-eligibility timers.
+- Cancelling from any workflow state goes through the platform `cancel` command, which handles refunds and stock release. A workflow can *offer* cancellation but cannot implement it.
+
 ## 6. Versioning (directive §5)
 
 | Bump | Meaning | Examples | Existing tenants |
@@ -220,4 +238,4 @@ These artefacts are cached by `content_hash` and are immutable. Tenants pinned t
 
 ## 10. Seed blueprints in git
 
-`blueprints/<vertical>/<version>.yaml` are the **source-controlled seeds**. The CLI command `arada blueprint import` loads them as drafts, and publishing still happens through the audited console flow. Phase 2 ships **Phones v1.0** end-to-end. The other 17 verticals are scheduled in Phase 15; each one is a YAML file plus any extensions it needs.
+`blueprints/<vertical>/<version>.yaml` are the **source-controlled seeds**. The CLI command `arada blueprint import` loads them as drafts, and publishing still happens through the audited console flow. Phase 1 ships the engine with a test blueprint. Phase 5 ships **Phones v1.0** production-grade as the reference vertical (ADR-028). The other 17 verticals follow in Phase 7; each one is a YAML file plus any extensions it needs.

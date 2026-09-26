@@ -59,7 +59,7 @@ Status: **Proposed** · Related: ADR-002, ADR-003, ADR-013, ADR-022 · Engine: P
 | `deployments` · `releases` · `tenant_health` | … | `11`, `12` |
 | `provider_credentials` | id, scope (platform/tenant), tenant_id, provider, ciphertext, key_version, rotated_at | Envelope-encrypted (`09` §6) |
 | `integrations` · `webhook_subscriptions` | … | Outbound partner webhooks (future) |
-| `audit_events` | id, at, actor_person_id, actor_type, tenant_id NULL, action, target_type, target_id, before jsonb, after jsonb, reason, request_id, ip, user_agent | Append-only, partitioned monthly |
+| `audit_events` | id, at, actor_person_id, actor_type, tenant_id NULL, action, resource_type, resource_id, before jsonb, after jsonb, reason, source (console/api/bot/job/cli), request_id, trace_id, ip, user_agent | Append-only (triggers + INSERT/SELECT-only grants, so no administrator can edit it through the app), partitioned monthly |
 
 ### `commerce` (tenant data plane; all tables are RLS-scoped)
 
@@ -69,7 +69,7 @@ Status: **Proposed** · Related: ADR-002, ADR-003, ADR-013, ADR-022 · Engine: P
 | `customer_addresses` | tenant_id, id, customer_id, area_code, label, details_enc, geo |
 | `staff_profiles` | tenant_id, id, person_id, title, status (memberships themselves live in `control.role_assignments`) |
 | `categories` | tenant_id NULL (vertical-level) or tenant-specific, id, parent_id, key, name i18n, path ltree |
-| `listings` | tenant_id, id, category_id, blueprint_version_id, schema_rev, title i18n, description i18n, status (draft/pending/published/archived), price_minor, currency, attributes jsonb, search_doc tsvector, published_at, version |
+| `listings` | tenant_id, id, category_id, blueprint_version_id, schema_rev, title i18n, description i18n, status (draft/pending/published/archived), price_minor, currency, attributes jsonb, search_doc tsvector, search_text (normalised + transliterated, for trigram), published_at, version |
 | `listing_variants` | tenant_id, id, listing_id, sku, attributes jsonb, price_minor, currency |
 | `listing_media` | tenant_id, id, listing_id, asset_id, position |
 | `attribute_values` | Typed projection (`03` §2) |
@@ -77,11 +77,11 @@ Status: **Proposed** · Related: ADR-002, ADR-003, ADR-013, ADR-022 · Engine: P
 | `inventory_movements` | tenant_id, id, item_id, delta, reason, ref — append-only |
 | `entity_records` | Custom blueprint entities (`03` §2) |
 | `carts` · `cart_items` | Short-lived, per customer |
-| `orders` | tenant_id, id, ref, customer_id, channel, blueprint_version_id, workflow_key, state, payment_status, fulfilment_status, currency, subtotal_minor, discount_minor, delivery_minor, fee_minor, tax_minor, total_minor, commission_snapshot jsonb, placed_at, version |
+| `orders` | tenant_id, id, ref, customer_id, channel, blueprint_version_id, workflow_key, status (core lifecycle), workflow_state (blueprint), payment_status, currency, subtotal_minor, discount_minor, delivery_minor, fee_minor, tax_minor, total_minor, commission_snapshot jsonb, placed_at, version |
 | `order_items` | tenant_id, id, order_id, variant_id, qty, unit_price_minor, line_total_minor, commission_rule_id, commission_bps |
-| `order_state_transitions` | tenant_id, id, order_id, from_state, to_state, actor, reason, at — append-only |
+| `order_state_transitions` | tenant_id, id, order_id, field (status/workflow_state), from_state, to_state, actor, reason, request_id, at — append-only |
 | `workflow_instances` · `workflow_transitions` | Generic workflow runtime for custom entities |
-| `deliveries` · `delivery_events` · `couriers` · `delivery_zones` | Phase 11 |
+| `deliveries` · `delivery_events` · `couriers` · `delivery_zones` | Phase 8 |
 | `reviews` · `review_eligibility` | Eligibility created by `OrderCompleted`. Only one review per (eligibility, subject). |
 | `promotions` · `coupons` · `coupon_redemptions` | Tenant-scoped (directive §48) |
 | `referral_codes` · `referral_attributions` | `04` §6 |
@@ -137,7 +137,7 @@ erDiagram
 ## 5. Indexing and scale notes
 
 - Every tenant-table index leads with `tenant_id`.
-- `listings`: GIN on `search_doc`; B-tree `(tenant_id, status, published_at DESC)`; `(tenant_id, category_id, price_minor)`.
+- `listings`: GIN on `search_doc`; GIN `gin_trgm_ops` on `search_text`; B-tree `(tenant_id, status, published_at DESC)`; `(tenant_id, category_id, price_minor)`.
 - `attribute_values`: `(tenant_id, attr_key, num_value)`, `(tenant_id, attr_key, text_value)`, `(tenant_id, attr_key, date_value)`.
 - **Partitioning** (by month, `pg_partman`, created in advance by `scheduler`): `ledger_entries`, `audit_events`, `provider_events`, `outbox` (published rows are pruned after 14 days), and analytics facts.
 - Connection pooling: PgBouncer in transaction mode in front of Postgres once there are more than 2 `api` replicas. This works because tenant context is set with `SET LOCAL`.
