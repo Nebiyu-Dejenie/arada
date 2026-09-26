@@ -1,0 +1,144 @@
+# Phones blueprint v2.0.0: colour becomes a fixed list (MAJOR: type change string -> enum).
+# Seed data, not platform code: loaded through the blueprint API.
+schema_version: 1
+description: Retail phones (new and used handsets)
+features:
+  reviews: true
+  delivery: false
+extensions: []
+entities:
+  listing:
+    kind: core
+    label:
+      en: Phone listing
+      am: የስልክ ማስታወቂያ
+    attributes:
+    - key: brand
+      type: enum
+      required: true
+      filterable: true
+      searchable: true
+      label:
+        en: Brand
+        am: ብራንድ
+      options:
+      - key: samsung
+        label:
+          en: Samsung
+      - key: apple
+        label:
+          en: Apple
+      - key: tecno
+        label:
+          en: Tecno
+      - key: infinix
+        label:
+          en: Infinix
+      - key: xiaomi
+        label:
+          en: Xiaomi
+      - key: other
+        label:
+          en: Other
+    - key: model
+      type: string
+      required: true
+      searchable: true
+      label:
+        en: Model
+    - key: storage_gb
+      type: enum
+      filterable: true
+      label:
+        en: Storage (GB)
+      options:
+      - key: '32'
+      - key: '64'
+      - key: '128'
+      - key: '256'
+      - key: '512'
+      - key: '1024'
+    - key: ram_gb
+      type: enum
+      filterable: true
+      label:
+        en: RAM (GB)
+      options:
+      - key: '2'
+      - key: '3'
+      - key: '4'
+      - key: '6'
+      - key: '8'
+      - key: '12'
+      - key: '16'
+    - key: condition
+      type: enum
+      required: true
+      filterable: true
+      label:
+        en: Condition
+        am: ሁኔታ
+      options:
+      - key: new
+        label:
+          en: New
+          am: አዲስ
+      - key: used
+        label:
+          en: Used
+          am: ያገለገለ
+      - key: refurbished
+        label:
+          en: Refurbished
+    - key: imei
+      type: string
+      visibility: staff
+      unique_within_tenant: true
+      extensions:
+      - imei.luhn
+      label:
+        en: IMEI
+    - key: battery_health
+      type: number
+      unit: '%'
+      min: 0
+      max: 100
+      filterable: true
+      label:
+        en: Battery health
+        am: የባትሪ ጤንነት
+    - key: color
+      type: enum
+      filterable: true
+      label:
+        en: Colour
+      options:
+      - key: black
+      - key: white
+      - key: blue
+      - key: green
+      - key: gold
+      - key: other
+    - key: warranty_months
+      type: number
+      min: 0
+      max: 36
+      label:
+        en: Warranty (months)
+  warranty:
+    kind: custom
+    label:
+      en: Warranty
+    attributes:
+    - key: listing
+      type: relation
+      target: listing
+      required: true
+    - key: starts_on
+      type: date
+      required: true
+    - key: months
+      type: number
+      min: 1
+      max: 36
+      required: true
