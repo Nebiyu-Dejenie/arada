@@ -32,6 +32,7 @@ SAMPLE_BODIES: dict[tuple[str, str], dict[str, Any] | None] = {
     ("PUT", "/v1/t/{tenant_slug}/staff/{membership_id}/roles"): {"roles": ["TENANT_ADMIN"]},
     ("POST", "/v1/t/{tenant_slug}/staff/{membership_id}:remove"): None,
     ("GET", "/v1/t/{tenant_slug}/audit-events"): None,
+    ("GET", "/v1/t/{tenant_slug}/features"): None,
 }
 
 
