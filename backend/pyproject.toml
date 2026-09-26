@@ -95,9 +95,17 @@ filterwarnings = ["error::DeprecationWarning:arada.*"]
 # Contracts are extended as each module lands (see docs/adr/ADR-001).
 [tool.importlinter]
 root_package = "arada"
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "Kernel depends on no domain module, HTTP layer or CLI"
 type = "forbidden"
 source_modules = ["arada.kernel"]
 forbidden_modules = ["arada.api", "arada.cli", "arada.ops"]
+
+[[tool.importlinter.contracts]]
+name = "Domain modules never import the HTTP layer, CLI or web framework"
+type = "forbidden"
+source_modules = ["arada.audit", "arada.identity"]
+forbidden_modules = ["arada.api", "arada.cli", "fastapi", "starlette"]
+allow_indirect_imports = true
