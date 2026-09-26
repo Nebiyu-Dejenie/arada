@@ -1,0 +1,54 @@
+# --- Secrets: never commit (this repository is public) ---
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.age
+credentials.json
+*-credentials.json
+tunnel-credentials.json
+infra/cloudflared/config.yml
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform/
+secrets/
+vault-pass*
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Node / frontend ---
+node_modules/
+dist/
+build/
+.pnpm-store/
+*.tsbuildinfo
+
+# --- Local data, backups, logs ---
+backups/
+*.dump
+*.sql.gz
+*.log
+tmp/
+
+# --- Editors / OS ---
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
