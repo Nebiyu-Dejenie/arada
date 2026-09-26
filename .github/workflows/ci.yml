@@ -1,0 +1,85 @@
+# Quality gates for every push and pull request (Permanent Command §31, §42).
+#
+# Everything runs from the repository alone on a clean runner: throwaway
+# secrets are generated per run (nothing secret is stored in the workflow),
+# third-party actions are pinned to commit SHAs, and permissions are minimal.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.11.15"
+
+jobs:
+  backend:
+    name: Lint, types, boundaries, tests, dependency audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: Throwaway secrets and PostgreSQL
+        working-directory: .
+        run: |
+          ./scripts/init-env.sh
+          docker compose up -d --wait postgres
+      - name: Install from lockfile
+        run: uv sync --frozen --python 3.12
+      - name: Lint and format (backend and scripts)
+        run: |
+          uv run ruff check . ../scripts
+          uv run ruff format --check . ../scripts
+      - name: Type check (strict)
+        run: uv run mypy
+      - name: Module boundaries
+        run: uv run lint-imports
+      - name: Tests (unit, integration, API, tenant isolation, security)
+        run: uv run pytest -q --cov=arada --cov-report=term-missing:skip-covered
+      - name: Dependency vulnerability audit
+        run: |
+          uv export --frozen --no-dev --no-emit-project --no-hashes --format requirements-txt > "$RUNNER_TEMP/requirements.txt"
+          uv run pip-audit --strict --disable-pip --no-deps -r "$RUNNER_TEMP/requirements.txt"
+
+  secrets:
+    name: Secret scan (full history)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.30.1 git /repo --redact --no-banner
+
+  reproduce:
+    name: Fresh stack from zero + Definition-of-Done walkthrough
+    needs: backend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: Build, migrate from zero, bootstrap, walk through, tear down
+        run: ./scripts/phase1_demo.sh
+      - name: Container image scan (critical, fixable)
+        run: |
+          docker build -q -t arada-platform:scan backend
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.74.0 image --exit-code 1 --severity CRITICAL --ignore-unfixed --no-progress arada-platform:scan

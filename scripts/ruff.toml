@@ -1,0 +1,5 @@
+# Operational scripts share the backend's lint rules; printing is their output.
+extend = "../backend/pyproject.toml"
+
+[lint.per-file-ignores]
+"*.py" = ["T20"]
