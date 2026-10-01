@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | **Design review complete; awaiting owner approval. Nothing in this document is implemented.** |
+| **Status** | **Design APPROVED by the owner (2026-10-01) as the working plan, including its non-goals. Implementation BLOCKED by B5** until the official Telegram docs are verified. Nothing in this document is implemented. |
 | **Date** | 2026-10-01 |
 | **Baseline** | Phase 1 approved by the owner at `4896f60ad3d159e3a487e1aa56631ead0ed319ba` |
 | **Inputs** | `04_TELEGRAM_ARCHITECTURE.md`, `02_TENANCY.md` §6, `17_API_CONTRACTS.md`, `19_ACCEPTANCE_TESTS.md`, ADR-011, ADR-012, ADR-017, ADR-024, ADR-029, ADR-034, ADR-035, register `20_DECISIONS.md` |
@@ -203,12 +203,16 @@ Crypto runs before freshness so a stale but forged request is counted as forged.
 8. Security inventory updates (ADR-032), the AUTH-4 static check, and the full gates.
 9. `docs/reports/PHASE_2.md` with evidence per claim; `21_IMPLEMENTATION_STATUS.md` updated.
 
-## 13. Decisions requested from the owner
+## 13. Owner decisions (2026-10-01)
 
-| # | Decision | Proposed default |
+| # | Decision | Outcome |
 |---|---|---|
-| D1 | Approve this plan and its non-goals | — |
-| D2 | B5: allow `core.telegram.org` in this environment's network access so the algorithm and keys can be re-verified, or accept the 2026-09-26 record (K7) as the spec with conformance marked **UNVERIFIED** until checked | Allow the host |
-| D3 | U5 for Phase 2: bring-your-own, merchant-owned bots (A7) | Accept |
-| D4 | ADR-036: opaque tenant-bound customer sessions instead of a JWT plus refresh handle | Accept |
-| D5 | A generic 401 to clients, with reason codes only in logs and metrics (changes the ISO-4 and AUTH-1…3 expected outputs) | Accept |
+| D1 | Plan and non-goals | **Approved** as the working plan |
+| D2 | Telegram documentation | **Fresh verification against core.telegram.org required.** Memory, tutorials, archives, blogs, framework code and the repository's own record (K7) are **not** acceptable substitutes. Still blocked (B5): access was re-checked on 2026-10-01 and the network policy still denies the host |
+| D3 | Bot ownership (U5) | **Approved:** merchant-owned, bring-your-own bots for Phase 2 |
+| D4 | Customer sessions | **Approved in principle:** opaque, server-side sessions tied to one tenant and one customer, subject to the final ADR-036 review. ADR-036 becomes authoritative over the JWT and refresh-handle text in `04` §5 and `17` once adopted |
+| D5 | Failure responses | **Approved:** generic 401 to the client. Reason categories go to controlled logs and metrics only. Raw `initData`, tokens, secrets and sensitive personal data are never logged |
+
+Also approved: the tenant is derived server-side from the merchant host; a client-supplied tenant is never an authorisation boundary; the layers stay separate; customer authentication grants no business authorisation by itself; and every customer session lookup and resource access is tenant-scoped server-side.
+
+**Next step:** once `core.telegram.org` is reachable, verify §5 point by point, record the official URLs and sections, update this plan and ADR-012, and report before writing any code.
