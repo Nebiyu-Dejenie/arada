@@ -1,8 +1,9 @@
-"""Platform control plane: roles, persons, role grants, verticals."""
+"""Platform control plane: roles, persons, role grants, verticals, merchant bots."""
 
 from __future__ import annotations
 
 from dataclasses import asdict
+from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
@@ -12,6 +13,7 @@ from pydantic import Field
 from arada.api.auth import CurrentPrincipal
 from arada.api.deps import container_of, platform
 from arada.api.schemas import RequestModel, ResponseModel
+from arada.bots import service as bots
 from arada.identity import service as identity
 from arada.rbac import service as rbac
 from arada.verticals import service as verticals
@@ -114,3 +116,74 @@ async def list_verticals(principal: CurrentPrincipal, request: Request) -> list[
     async with platform(request, principal) as scope:
         items = await verticals.list_visible(scope)
     return [VerticalOut(**asdict(v)) for v in items]
+
+
+# ------------------------------------------------- merchant Telegram bots (Phase 2)
+class TelegramBotIn(RequestModel):
+    """A merchant's own bot. ``bot_id`` is supplied explicitly (decision D6):
+    it is never parsed from the token. Neither value is ever echoed back."""
+
+    bot_id: int = Field(gt=0, lt=2**53)
+    bot_token: str = Field(min_length=16, max_length=256)
+
+
+class TelegramBotOut(ResponseModel):
+    tenant_id: UUID
+    bot_id: int
+    status: str
+    registered_at: datetime
+
+
+def _bot_out(status: bots.BotStatus) -> TelegramBotOut:
+    return TelegramBotOut(
+        tenant_id=status.tenant_id,
+        bot_id=status.telegram_bot_id,
+        status=status.status,
+        registered_at=status.created_at,
+    )
+
+
+@router.put(
+    "/platform/tenants/{tenant_id}/telegram-bot",
+    response_model=TelegramBotOut,
+    summary="Bind or replace a tenant's own Telegram bot",
+    description=(
+        "Stores the token encrypted. Replacing a bot revokes the tenant's customer "
+        "sessions. No call is made to Telegram: a wrong bot_id fails closed at login."
+    ),
+)
+async def put_telegram_bot(
+    tenant_id: UUID, body: TelegramBotIn, principal: CurrentPrincipal, request: Request
+) -> TelegramBotOut:
+    c = container_of(request)
+    async with platform(request, principal) as scope:
+        status = await bots.register(
+            scope, c.keyring, tenant_id=tenant_id, bot_id=body.bot_id, token=body.bot_token
+        )
+    return _bot_out(status)
+
+
+@router.get(
+    "/platform/tenants/{tenant_id}/telegram-bot",
+    response_model=TelegramBotOut,
+    summary="The tenant's active Telegram bot (never the token)",
+)
+async def get_telegram_bot(
+    tenant_id: UUID, principal: CurrentPrincipal, request: Request
+) -> TelegramBotOut:
+    async with platform(request, principal) as scope:
+        status = await bots.status_of(scope, tenant_id)
+    return _bot_out(status)
+
+
+@router.delete(
+    "/platform/tenants/{tenant_id}/telegram-bot",
+    status_code=204,
+    summary="Disable the tenant's Telegram bot and revoke its customer sessions",
+)
+async def delete_telegram_bot(
+    tenant_id: UUID, principal: CurrentPrincipal, request: Request
+) -> Response:
+    async with platform(request, principal) as scope:
+        await bots.disable(scope, tenant_id)
+    return Response(status_code=204)

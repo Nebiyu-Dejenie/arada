@@ -30,6 +30,10 @@ async def test_schema_builds_from_zero_and_round_trips(pg_env: PgEnv) -> None:
                 "SELECT table_name FROM information_schema.tables WHERE table_schema = 'control'"
             )
             assert leftover == []
+            schemas = await conn.fetch(
+                "SELECT nspname FROM pg_namespace WHERE nspname IN ('control', 'commerce')"
+            )
+            assert schemas == [], "downgrade must remove every application schema"
         finally:
             await conn.close()
         await asyncio.to_thread(command.upgrade, cfg, "head")

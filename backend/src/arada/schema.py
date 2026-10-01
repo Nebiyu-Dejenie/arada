@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from arada.audit import tables as audit_tables
 from arada.blueprints import tables as blueprint_tables
+from arada.bots import tables as bot_tables
+from arada.customers import tables as customer_tables
 from arada.identity import tables as identity_tables
 from arada.kernel.sql import metadata
 from arada.rbac import tables as rbac_tables
@@ -22,6 +24,8 @@ TABLE_MODULES = (
     rbac_tables,
     blueprint_tables,
     tenancy_tables,
+    bot_tables,
+    customer_tables,
 )
 
 __all__ = ["TABLE_MODULES", "metadata"]

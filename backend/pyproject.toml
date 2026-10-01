@@ -108,10 +108,39 @@ name = "Domain modules never import the HTTP layer, CLI or web framework"
 type = "forbidden"
 source_modules = [
     "arada.audit", "arada.identity", "arada.rbac", "arada.verticals", "arada.access",
-    "arada.blueprints", "arada.tenancy", "arada.flags",
+    "arada.blueprints", "arada.tenancy", "arada.flags", "arada.bots", "arada.customers",
+    "arada.telegram",
 ]
 forbidden_modules = ["arada.api", "arada.cli", "fastapi", "starlette"]
 allow_indirect_imports = true
+
+# Phase 2 (PHASE_2_PLAN.md §2 item 7): authentication, tenant resolution,
+# identity mapping, authorisation and business logic stay separate layers.
+[[tool.importlinter.contracts]]
+name = "The Telegram Mini App protocol is pure: it imports no application module"
+type = "forbidden"
+source_modules = ["arada.telegram"]
+forbidden_modules = [
+    "arada.access", "arada.api", "arada.audit", "arada.blueprints", "arada.bots", "arada.cli",
+    "arada.customers", "arada.flags", "arada.identity", "arada.kernel", "arada.ops",
+    "arada.rbac", "arada.tenancy", "arada.verticals", "sqlalchemy", "asyncpg",
+]
+
+[[tool.importlinter.contracts]]
+name = "Only the customer login uses the Telegram protocol; core modules never do"
+type = "forbidden"
+source_modules = [
+    "arada.kernel", "arada.audit", "arada.identity", "arada.rbac", "arada.verticals",
+    "arada.blueprints", "arada.tenancy", "arada.flags", "arada.bots", "arada.access",
+    "arada.customers.service", "arada.customers.sessions",
+]
+forbidden_modules = ["arada.telegram"]
+
+[[tool.importlinter.contracts]]
+name = "Identity, tenancy, RBAC and audit sit below customers and bots"
+type = "forbidden"
+source_modules = ["arada.identity", "arada.tenancy", "arada.rbac", "arada.audit"]
+forbidden_modules = ["arada.customers", "arada.bots", "arada.access"]
 
 # ---------------------------------------------------------------- coverage
 # SQLAlchemy's asyncio layer runs code inside greenlets; without greenlet

@@ -44,6 +44,21 @@ class Principal:
 
 
 @dataclass(frozen=True, slots=True)
+class CustomerPrincipal:
+    """An authenticated customer: one person, as seen by exactly one tenant.
+
+    Deliberately a different type from ``Principal``: a customer session can
+    never be passed where a staff session is expected, and it carries no
+    roles or permissions (ADR-036).
+    """
+
+    tenant_id: UUID
+    customer_id: UUID
+    person_id: UUID
+    session_id: UUID
+
+
+@dataclass(frozen=True, slots=True)
 class TenantRef:
     id: UUID
     slug: str

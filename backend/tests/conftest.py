@@ -28,7 +28,9 @@ from arada.kernel.db import Database
 from arada.main import create_app
 from arada.ops.db_bootstrap import RolePasswords, bootstrap_roles
 from arada.rbac.bootstrap import bootstrap_super_admin
+from tests.storefront import Storefront, open_storefront
 from tests.support import DEFAULT_PASSWORD, Persona, enrol_totp, login, unique
+from tests.telegram_kit import Signer
 from tests.world import World, build_world
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -130,7 +132,13 @@ async def test_database(pg_env: PgEnv) -> AsyncIterator[str]:
 
 
 @pytest.fixture(scope="session")
-def settings(pg_env: PgEnv, test_database: str) -> Settings:
+def telegram_signer() -> Signer:
+    """A throwaway key standing in for Telegram's test-environment key."""
+    return Signer()
+
+
+@pytest.fixture(scope="session")
+def settings(pg_env: PgEnv, test_database: str, telegram_signer: Signer) -> Settings:
     return Settings(
         environment=Environment.TEST,
         database_url=pg_env.url("arada_app", pg_env.passwords.app, test_database),
@@ -142,6 +150,8 @@ def settings(pg_env: PgEnv, test_database: str) -> Settings:
         log_format="console",
         log_level="WARNING",
         require_mfa_for_privileged_scopes=True,
+        telegram_environment="test",
+        telegram_public_key_hex=telegram_signer.public_hex,
     )
 
 
@@ -201,3 +211,14 @@ async def super_admin(settings: Settings, client: httpx.AsyncClient) -> Persona:
 async def world(client: httpx.AsyncClient, super_admin: Persona) -> World:
     """Two merchants (A, B) with Owner, Admin and Staff each, built via the API."""
     return await build_world(client, super_admin)
+
+
+@pytest.fixture(scope="session")
+async def storefronts(
+    client: httpx.AsyncClient, super_admin: Persona, world: World
+) -> tuple[Storefront, Storefront]:
+    """A host and an own bot for tenants A and B. Bound once: re-binding a bot
+    revokes customer sessions, so tests that replace bots use fresh tenants."""
+    a = await open_storefront(client, super_admin, world.a.id, world.a.slug)
+    b = await open_storefront(client, super_admin, world.b.id, world.b.slug)
+    return a, b

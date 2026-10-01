@@ -10,12 +10,27 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 from enum import StrEnum
 from functools import lru_cache
 from typing import Literal
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+TelegramEnvironment = Literal["production", "test"]
+
+# SHA-256 fingerprints of the two Ed25519 public keys Telegram publishes for
+# Mini App ``initData`` signatures (core.telegram.org/bots/webapps
+# #validating-data-for-third-party-use, verified 2026-10-01; ADR-012). The key
+# used for verification always comes from configuration. These fingerprints
+# exist only so that a deployment can never pair the wrong key with its
+# environment, and so that production refuses anything but the production key.
+TELEGRAM_KEY_FINGERPRINTS: dict[str, TelegramEnvironment] = {
+    "bb05ef4a95bd4f628f66eb95606254daa0281a7ff269dd326c8ce7d4c670c0a1": "production",
+    "8f7cb56f29bb50b78bcde54350e3425ca5e40eadf5eb62fcd41f071f990e23bc": "test",
+}
 
 
 class Environment(StrEnum):
@@ -70,6 +85,22 @@ class Settings(BaseSettings):
     # Tenancy
     invitation_ttl_hours: int = Field(default=72, ge=1, le=24 * 30)
 
+    # Telegram Mini App authentication (ADR-012, PHASE_2_PLAN.md §5, §9).
+    # Telegram's test and production environments are completely separate;
+    # one deployment talks to exactly one, with that environment's public key.
+    # Without a key, every Telegram login fails closed.
+    telegram_environment: TelegramEnvironment = "test"
+    telegram_public_key_hex: str | None = None
+    # Freshness and replay are our policy: Telegram defines neither.
+    telegram_init_data_max_age_seconds: int = Field(default=3600, ge=60, le=86_400)
+    telegram_init_data_future_skew_seconds: int = Field(default=60, ge=0, le=300)
+    telegram_init_data_reuse_window_seconds: int = Field(default=600, ge=0, le=3600)
+    telegram_init_data_max_uses: int = Field(default=20, ge=1, le=1000)
+
+    # Customer sessions (ADR-036): opaque, server-side, bound to one tenant.
+    customer_session_idle_timeout_minutes: int = Field(default=30, ge=1)
+    customer_session_absolute_timeout_hours: int = Field(default=12, ge=1)
+
     @field_validator("root_domain")
     @classmethod
     def _normalise_root_domain(cls, value: str | None) -> str | None:
@@ -88,10 +119,39 @@ class Settings(BaseSettings):
             raise ValueError("kek_base64 must decode to exactly 32 bytes")
         return value
 
+    @field_validator("telegram_public_key_hex")
+    @classmethod
+    def _validate_telegram_key(cls, value: str | None) -> str | None:
+        if value is None or value.strip() == "":
+            return None
+        key = value.strip().lower()
+        if len(key) != 64 or any(c not in "0123456789abcdef" for c in key):
+            raise ValueError("telegram_public_key_hex must be 64 hex characters (32 bytes)")
+        try:
+            Ed25519PublicKey.from_public_bytes(bytes.fromhex(key))
+        except ValueError as exc:
+            raise ValueError("telegram_public_key_hex is not a valid Ed25519 public key") from exc
+        return key
+
+    @model_validator(mode="after")
+    def _telegram_key_matches_environment(self) -> Settings:
+        """A known Telegram key must belong to the configured environment."""
+        known = self.telegram_key_environment
+        if known is not None and known != self.telegram_environment:
+            raise ValueError(
+                f"telegram_public_key_hex is Telegram's {known} key but "
+                f"telegram_environment is {self.telegram_environment}"
+            )
+        return self
+
     @model_validator(mode="after")
     def _production_guards(self) -> Settings:
         if self.environment is Environment.PRODUCTION:
             problems: list[str] = []
+            if self.telegram_environment != "production":
+                problems.append("telegram_environment must be production")
+            if self.telegram_key_environment != "production":
+                problems.append("telegram_public_key_hex must be Telegram's production key")
             if not self.require_mfa_for_privileged_scopes:
                 problems.append("require_mfa_for_privileged_scopes must be true")
             if not self.require_mfa_for_privileged_tenant_roles:
@@ -105,6 +165,14 @@ class Settings(BaseSettings):
             if problems:
                 raise ValueError("unsafe production configuration: " + "; ".join(problems))
         return self
+
+    @property
+    def telegram_key_environment(self) -> TelegramEnvironment | None:
+        """Which Telegram environment the configured key belongs to, if known."""
+        if self.telegram_public_key_hex is None:
+            return None
+        fingerprint = hashlib.sha256(bytes.fromhex(self.telegram_public_key_hex)).hexdigest()
+        return TELEGRAM_KEY_FINGERPRINTS.get(fingerprint)
 
     @property
     def kek(self) -> bytes:

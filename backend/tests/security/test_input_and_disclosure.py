@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from arada.kernel.config import Environment, Settings
 from arada.main import create_app
 from tests.conftest import PgEnv
+from tests.storefront import TELEGRAM_PRODUCTION_PUBLIC_KEY
 from tests.support import DEFAULT_PASSWORD, Persona
 from tests.world import World
 
@@ -184,6 +185,8 @@ async def test_api_docs_are_off_in_production(settings: Settings) -> None:
             "expose_api_docs": False,
             "root_domain": "example.test",
             "log_format": "json",
+            "telegram_environment": "production",
+            "telegram_public_key_hex": TELEGRAM_PRODUCTION_PUBLIC_KEY,
         }
     )
     app = create_app(prod)

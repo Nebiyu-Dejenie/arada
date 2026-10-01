@@ -18,12 +18,19 @@ from arada.kernel.errors import Unauthenticated
 _MIN_TOKEN, _MAX_TOKEN = 20, 200
 
 
-async def authenticated(request: Request) -> Principal:
+def bearer_token(request: Request) -> str:
+    """The bearer token from the Authorization header, or 401. Shape only."""
     header = request.headers.get("authorization", "")
     scheme, _, token = header.partition(" ")
     token = token.strip()
     if scheme.lower() != "bearer" or not _MIN_TOKEN <= len(token) <= _MAX_TOKEN:
         raise Unauthenticated()
+    return token
+
+
+async def authenticated(request: Request) -> Principal:
+    """Staff authentication: ``control.sessions`` only, never customer sessions."""
+    token = bearer_token(request)
     container = container_of(request)
     async with container.db.transaction() as conn:
         principal = await sessions.authenticate(conn, container.settings, token)

@@ -24,29 +24,44 @@ import httpx
 import pytest
 
 from arada.kernel.ids import uuid7
+from tests.storefront import Storefront, new_customer
 from tests.support import Persona
+from tests.telegram_kit import Signer
 from tests.world import World
 
 TENANT_TABLES = (
-    "audit_events",
-    "domains",
-    "feature_flag_overrides",
-    "merchant_profiles",
-    "tenant_blueprint_assignments",
-    "tenant_invitation_roles",
-    "tenant_invitations",
-    "tenant_membership_roles",
-    "tenant_memberships",
+    "commerce.customers",
+    "control.audit_events",
+    "control.customer_sessions",
+    "control.domains",
+    "control.feature_flag_overrides",
+    "control.merchant_profiles",
+    "control.telegram_bots",
+    "control.telegram_init_data_uses",
+    "control.tenant_blueprint_assignments",
+    "control.tenant_invitation_roles",
+    "control.tenant_invitations",
+    "control.tenant_membership_roles",
+    "control.tenant_memberships",
 )
-# Tables where arada_app holds UPDATE / DELETE at all (others: denied by grant).
+# Tables where arada_app may UPDATE tenant_id at all. Column-level grants
+# (telegram_bots, customer_sessions, telegram_init_data_uses) never include
+# tenant_id, so for those the UPDATE below is refused by privilege instead.
 UPDATABLE = {
-    "domains",
-    "feature_flag_overrides",
-    "merchant_profiles",
-    "tenant_invitations",
-    "tenant_memberships",
+    "control.domains",
+    "control.feature_flag_overrides",
+    "control.merchant_profiles",
+    "control.tenant_invitations",
+    "control.tenant_memberships",
 }
-DELETABLE = {"feature_flag_overrides", "tenant_membership_roles"}
+DELETABLE = {
+    "control.feature_flag_overrides",
+    "control.telegram_init_data_uses",
+    "control.tenant_membership_roles",
+}
+# Every schema the application owns. The lint scans all of them, so a tenant
+# table in a new schema cannot escape it.
+APP_SCHEMAS = ("commerce", "control")
 
 
 @asynccontextmanager
@@ -69,11 +84,26 @@ class Rows:
     b_invitation: uuid.UUID
     a_host: str
     b_host: str
+    a_customer: uuid.UUID
+    b_customer: uuid.UUID
 
 
 @pytest.fixture(scope="module")
-async def rows(client: httpx.AsyncClient, super_admin: Persona, world: World) -> Rows:
+async def rows(
+    client: httpx.AsyncClient,
+    super_admin: Persona,
+    world: World,
+    storefronts: tuple[Storefront, Storefront],
+    telegram_signer: Signer,
+) -> Rows:
     """Committed rows for both tenants in every tenant table, via the API."""
+    customer_ids: dict[str, uuid.UUID] = {}
+    for key, storefront in zip(("a", "b"), storefronts, strict=True):
+        # Bot (telegram_bots), customer, session and replay row for each tenant.
+        customer = await new_customer(client, storefront, telegram_signer)
+        me = await client.get("/v1/storefront/me", headers=customer.headers)
+        assert me.status_code == 200, me.text
+        customer_ids[key] = uuid.UUID(me.json()["customer_id"])
     hosts: dict[str, str] = {}
     invitations: dict[str, uuid.UUID] = {}
     for key, tenant in (("a", world.a), ("b", world.b)):
@@ -97,7 +127,14 @@ async def rows(client: httpx.AsyncClient, super_admin: Persona, world: World) ->
         )
         assert invited.status_code == 201, invited.text
         invitations[key] = uuid.UUID(invited.json()["id"])
-    return Rows(invitations["a"], invitations["b"], hosts["a"], hosts["b"])
+    return Rows(
+        invitations["a"],
+        invitations["b"],
+        hosts["a"],
+        hosts["b"],
+        customer_ids["a"],
+        customer_ids["b"],
+    )
 
 
 # ----------------------------------------------------------------- RLS lint
@@ -106,13 +143,23 @@ async def test_every_table_with_a_tenant_id_is_under_forced_rls(
 ) -> None:
     tables = await app_conn.fetch(
         """
-        SELECT c.relname, c.relrowsecurity AS rls, c.relforcerowsecurity AS forced
+        SELECT n.nspname || '.' || c.relname AS relname,
+               c.relrowsecurity AS rls, c.relforcerowsecurity AS forced
         FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
         JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = 'tenant_id' AND NOT a.attisdropped
-        WHERE n.nspname = 'control' AND c.relkind IN ('r', 'p')
+        WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+          AND n.nspname !~ '^pg_' AND c.relkind IN ('r', 'p')
         """
     )
+    schemas = {
+        r["nspname"]
+        for r in await app_conn.fetch(
+            "SELECT nspname FROM pg_namespace WHERE nspname NOT IN "
+            "('pg_catalog', 'information_schema', 'public') AND nspname !~ '^pg_'"
+        )
+    }
+    assert schemas == set(APP_SCHEMAS), f"new schema: add it to APP_SCHEMAS: {schemas}"
     assert {t["relname"] for t in tables} == set(TENANT_TABLES), (
         "a table gained or lost a tenant_id column: update TENANT_TABLES and its RLS tests"
     )
@@ -121,12 +168,13 @@ async def test_every_table_with_a_tenant_id_is_under_forced_rls(
 
     policies = await app_conn.fetch(
         """
-        SELECT c.relname, p.polname, p.polcmd::text AS polcmd,
+        SELECT n.nspname || '.' || c.relname AS relname, p.polname, p.polcmd::text AS polcmd,
                ARRAY(SELECT r.rolname FROM pg_roles r WHERE r.oid = ANY (p.polroles)) AS roles,
                pg_get_expr(p.polqual, p.polrelid) AS using_expr,
                pg_get_expr(p.polwithcheck, p.polrelid) AS check_expr
         FROM pg_policy p JOIN pg_class c ON c.oid = p.polrelid
-        WHERE c.relname = ANY ($1::text[])
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname || '.' || c.relname = ANY ($1::text[])
         """,
         list(TENANT_TABLES),
     )
@@ -164,7 +212,8 @@ async def test_runtime_role_cannot_bypass_rls(app_conn: asyncpg.Connection) -> N
     }
     owned = await app_conn.fetchval(
         "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
-        "WHERE n.nspname = 'control' AND c.relowner = 'arada_app'::regrole"
+        "WHERE n.nspname = ANY ($1::text[]) AND c.relowner = 'arada_app'::regrole",
+        list(APP_SCHEMAS),
     )
     assert owned == 0, "the runtime role owns a table (owners are exempt without FORCE)"
     memberships = await app_conn.fetch(
@@ -188,20 +237,18 @@ async def test_tenant_a_reads_only_its_own_rows(
         seen = {
             str(r["tenant_id"])
             for r in await app_conn.fetch(
-                f"SELECT DISTINCT tenant_id FROM control.{table} WHERE tenant_id IS NOT NULL"
+                f"SELECT DISTINCT tenant_id FROM {table} WHERE tenant_id IS NOT NULL"
             )
         }
         assert seen == {world.a.id}
         targeted = await app_conn.fetchval(
-            f"SELECT count(*) FROM control.{table} WHERE tenant_id = $1", uuid.UUID(world.b.id)
+            f"SELECT count(*) FROM {table} WHERE tenant_id = $1", uuid.UUID(world.b.id)
         )
         assert targeted == 0, "B's rows are invisible even when asked for by id"
 
         await ctx(app_conn, None)
         assert (
-            await app_conn.fetchval(
-                f"SELECT count(*) FROM control.{table} WHERE tenant_id IS NOT NULL"
-            )
+            await app_conn.fetchval(f"SELECT count(*) FROM {table} WHERE tenant_id IS NOT NULL")
             == 0
         ), "no tenant context: no tenant rows (fail closed)"
 
@@ -209,47 +256,69 @@ async def test_tenant_a_reads_only_its_own_rows(
 # ------------------------------------------------------------ writes, per table
 def _insert_into_b(world: World, rows: Rows) -> dict[str, tuple[str, tuple[Any, ...]]]:
     b = uuid.UUID(world.b.id)
+    a_person = uuid.UUID(str(world.a.admin.person_id))
     return {
-        "audit_events": (
+        "commerce.customers": (
+            "INSERT INTO commerce.customers (id, tenant_id, person_id) VALUES ($1, $2, $3)",
+            (uuid7(), b, a_person),
+        ),
+        "control.customer_sessions": (
+            "INSERT INTO control.customer_sessions (id, tenant_id, customer_id, token_hash, "
+            "idle_expires_at, expires_at) "
+            "VALUES ($1, $2, $3, $4, now() + interval '1 minute', now() + interval '1 hour')",
+            (uuid7(), b, rows.b_customer, secrets.token_bytes(32)),
+        ),
+        "control.telegram_bots": (
+            "INSERT INTO control.telegram_bots (id, tenant_id, telegram_bot_id, token_ciphertext, "
+            "token_nonce, wrapped_dek, dek_nonce, kek_version, status, disabled_at) "
+            "VALUES ($1, $2, 4242, 'x', $3, 'x', $3, 1, 'disabled', now())",
+            (uuid7(), b, secrets.token_bytes(12)),
+        ),
+        "control.telegram_init_data_uses": (
+            "INSERT INTO control.telegram_init_data_uses (tenant_id, hash_digest, expires_at) "
+            "VALUES ($1, $2, now() + interval '1 hour')",
+            (b, secrets.token_bytes(32)),
+        ),
+        "control.audit_events": (
             "INSERT INTO control.audit_events (id, tenant_id, actor_type, action, "
             "resource_type, source) VALUES ($1, $2, 'system', 'probe.forged', 'probe', 'system')",
             (uuid7(), b),
         ),
-        "domains": (
+        "control.domains": (
             "INSERT INTO control.domains (id, tenant_id, hostname, kind) "
             "VALUES ($1, $2, $3, 'storefront')",
             (uuid7(), b, f"evil-{secrets.token_hex(4)}.localhost"),
         ),
-        "feature_flag_overrides": (
+        "control.feature_flag_overrides": (
             "INSERT INTO control.feature_flag_overrides (id, flag_key, scope_type, tenant_id, "
             "enabled) VALUES ($1, 'coupons', 'tenant', $2, true)",
             (uuid7(), b),
         ),
-        "merchant_profiles": (
+        "control.merchant_profiles": (
             "INSERT INTO control.merchant_profiles (tenant_id, display_name) VALUES ($1, 'pwned')",
             (b,),
         ),
-        "tenant_blueprint_assignments": (
+        "control.tenant_blueprint_assignments": (
             "INSERT INTO control.tenant_blueprint_assignments "
             "(id, tenant_id, blueprint_version_id) VALUES ($1, $2, $3)",
             (uuid7(), b, uuid.UUID(world.versions["1.1.0"])),
         ),
-        "tenant_invitation_roles": (
+        "control.tenant_invitation_roles": (
             "INSERT INTO control.tenant_invitation_roles (tenant_id, invitation_id, role_key) "
             "VALUES ($1, $2, 'TENANT_OWNER')",
             (b, rows.b_invitation),
         ),
-        "tenant_invitations": (
+        "control.tenant_invitations": (
             "INSERT INTO control.tenant_invitations (id, tenant_id, token_hash, expires_at) "
             "VALUES ($1, $2, $3, now() + interval '1 hour')",
             (uuid7(), b, secrets.token_bytes(32)),
         ),
-        "tenant_membership_roles": (
+        "control.tenant_membership_roles": (
             "INSERT INTO control.tenant_membership_roles (tenant_id, membership_id, role_key) "
             "VALUES ($1, $2, 'TENANT_OWNER')",
             (b, uuid.UUID(world.b.memberships[world.b.staff.username])),
         ),
-        "tenant_memberships": (
+        "control.tenant_memberships": (
             "INSERT INTO control.tenant_memberships (id, tenant_id, person_id) VALUES ($1, $2, $3)",
             (uuid7(), b, uuid.UUID(str(world.a.admin.person_id))),
         ),
@@ -271,8 +340,8 @@ async def test_tenant_a_cannot_write_tenant_b_rows(
 
     # UPDATE / DELETE B's rows: they do not exist for A (or the grant is absent).
     for statement, allowed in (
-        (f"UPDATE control.{table} SET tenant_id = tenant_id WHERE tenant_id = $1", UPDATABLE),
-        (f"DELETE FROM control.{table} WHERE tenant_id = $1", DELETABLE),
+        (f"UPDATE {table} SET tenant_id = tenant_id WHERE tenant_id = $1", UPDATABLE),
+        (f"DELETE FROM {table} WHERE tenant_id = $1", DELETABLE),
     ):
         async with rolled_back(app_conn):
             await ctx(app_conn, a)
@@ -288,7 +357,7 @@ async def test_tenant_a_cannot_write_tenant_b_rows(
             async with rolled_back(app_conn):
                 await ctx(app_conn, a)
                 await app_conn.execute(
-                    f"UPDATE control.{table} SET tenant_id = $2 WHERE tenant_id = $1", a, b
+                    f"UPDATE {table} SET tenant_id = $2 WHERE tenant_id = $1", a, b
                 )
 
 
@@ -430,3 +499,127 @@ async def test_domains_resolve_only_through_the_host_resolver(
                 uuid7(),
                 f"platform-{secrets.token_hex(4)}.localhost",
             )
+
+
+# ------------------------------------------------- Phase 2 tables (migration 0010)
+async def test_bot_tokens_and_bindings_cannot_be_rewritten_by_the_runtime_role(
+    app_conn: asyncpg.Connection, world: World, rows: Rows
+) -> None:
+    a = uuid.UUID(world.a.id)
+    async with rolled_back(app_conn):
+        await ctx(app_conn, a)
+        assert await app_conn.fetchval("SELECT count(*) FROM control.telegram_bots") >= 1
+    # Only status and disabled_at are updatable: never the token, bot id or tenant.
+    for column, value in (
+        ("token_ciphertext", "'x'::bytea"),
+        ("telegram_bot_id", "1"),
+        ("tenant_id", "tenant_id"),
+        ("kek_version", "2"),
+    ):
+        with pytest.raises(asyncpg.InsufficientPrivilegeError, match="permission denied"):
+            async with rolled_back(app_conn):
+                await ctx(app_conn, a)
+                await app_conn.execute(f"UPDATE control.telegram_bots SET {column} = {value}")
+    with pytest.raises(asyncpg.InsufficientPrivilegeError, match="permission denied"):
+        async with rolled_back(app_conn):
+            await ctx(app_conn, a)
+            await app_conn.execute("DELETE FROM control.telegram_bots")
+    # Two active bots for one tenant are impossible.
+    with pytest.raises(asyncpg.UniqueViolationError):
+        async with rolled_back(app_conn):
+            await ctx(app_conn, a)
+            await app_conn.execute(
+                "INSERT INTO control.telegram_bots (id, tenant_id, telegram_bot_id, "
+                "token_ciphertext, token_nonce, wrapped_dek, dek_nonce, kek_version) "
+                "VALUES ($1, $2, 77, 'x', $3, 'x', $3, 1)",
+                uuid7(),
+                a,
+                secrets.token_bytes(12),
+            )
+
+
+async def test_customer_sessions_bind_to_their_own_tenant_and_customer(
+    app_conn: asyncpg.Connection, world: World, rows: Rows
+) -> None:
+    a = uuid.UUID(world.a.id)
+    # Labelled as A's session, pointing at B's customer: no such parent exists.
+    with pytest.raises(asyncpg.ForeignKeyViolationError):
+        async with rolled_back(app_conn):
+            await ctx(app_conn, a)
+            await app_conn.execute(
+                "INSERT INTO control.customer_sessions (id, tenant_id, customer_id, token_hash, "
+                "idle_expires_at, expires_at) "
+                "VALUES ($1, $2, $3, $4, now() + interval '1 minute', now() + interval '1 hour')",
+                uuid7(),
+                a,
+                rows.b_customer,
+                secrets.token_bytes(32),
+            )
+    # Only the liveness columns are updatable: never the binding, token or expiry.
+    for column in ("tenant_id", "customer_id", "token_hash", "expires_at", "created_at"):
+        with pytest.raises(asyncpg.InsufficientPrivilegeError, match="permission denied"):
+            async with rolled_back(app_conn):
+                await ctx(app_conn, a)
+                await app_conn.execute(f"UPDATE control.customer_sessions SET {column} = {column}")
+    # Customers are insert-only for the runtime role.
+    for statement in (
+        "UPDATE commerce.customers SET person_id = person_id",
+        "DELETE FROM commerce.customers",
+        "DELETE FROM control.customer_sessions",
+    ):
+        with pytest.raises(asyncpg.InsufficientPrivilegeError, match="permission denied"):
+            async with rolled_back(app_conn):
+                await ctx(app_conn, a)
+                await app_conn.execute(statement)
+
+
+async def test_replay_rows_can_only_be_deleted_once_expired(
+    app_conn: asyncpg.Connection, world: World, rows: Rows
+) -> None:
+    a = uuid.UUID(world.a.id)
+    live, expired = secrets.token_bytes(32), secrets.token_bytes(32)
+    async with rolled_back(app_conn):
+        await ctx(app_conn, a)
+        await app_conn.execute(
+            "INSERT INTO control.telegram_init_data_uses (tenant_id, hash_digest, expires_at) "
+            "VALUES ($1, $2, now() + interval '1 hour'), ($1, $3, now() - interval '1 second')",
+            a,
+            live,
+            expired,
+        )
+        deleted = await app_conn.execute(
+            "DELETE FROM control.telegram_init_data_uses WHERE hash_digest = ANY ($1::bytea[])",
+            [live, expired],
+        )
+        assert deleted == "DELETE 1", "only the expired row may go: the window is not resettable"
+        remaining = await app_conn.fetch(
+            "SELECT hash_digest FROM control.telegram_init_data_uses "
+            "WHERE hash_digest = ANY ($1::bytea[])",
+            [live, expired],
+        )
+        assert [r["hash_digest"] for r in remaining] == [live]
+    for column in ("first_used_at", "expires_at", "tenant_id", "hash_digest"):
+        with pytest.raises(asyncpg.InsufficientPrivilegeError, match="permission denied"):
+            async with rolled_back(app_conn):
+                await ctx(app_conn, a)
+                await app_conn.execute(
+                    f"UPDATE control.telegram_init_data_uses SET {column} = {column}"
+                )
+
+
+async def test_commerce_schema_is_closed_to_everyone_but_the_runtime_role(
+    app_conn: asyncpg.Connection,
+) -> None:
+    privileges = await app_conn.fetchrow(
+        "SELECT has_schema_privilege('arada_app', 'commerce', 'USAGE') AS app, "
+        "has_schema_privilege('arada_app', 'commerce', 'CREATE') AS app_create, "
+        "has_schema_privilege('arada_platform_reader', 'commerce', 'USAGE') AS reader, "
+        "has_schema_privilege('arada_resolver', 'commerce', 'USAGE') AS resolver"
+    )
+    assert privileges is not None
+    assert dict(privileges) == {
+        "app": True,
+        "app_create": False,
+        "reader": False,
+        "resolver": False,
+    }

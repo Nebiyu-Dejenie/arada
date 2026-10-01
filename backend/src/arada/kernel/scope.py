@@ -19,7 +19,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from arada.kernel.context import Principal, RequestMeta, TenantRef
+from arada.kernel.context import CustomerPrincipal, Principal, RequestMeta, TenantRef
 from arada.kernel.errors import AppError, Forbidden
 
 WRITABLE_TENANT_STATUSES = frozenset({"draft", "active"})
@@ -96,3 +96,23 @@ class Scope:
         if permission in self.grants.withheld_for_mfa:
             raise MfaStepUpRequired()
         raise Forbidden()
+
+
+@dataclass(slots=True)
+class CustomerScope:
+    """What customer-facing business logic receives (ADR-036).
+
+    The tenant comes from the request host, resolved server-side, and the
+    transaction's RLS context is already set to it. Authentication alone
+    grants nothing: a customer may act only on resources that business logic
+    proves are their own, by ``customer_id``, inside this tenant.
+    """
+
+    conn: AsyncConnection
+    meta: RequestMeta
+    tenant: TenantRef
+    principal: CustomerPrincipal
+
+    def __post_init__(self) -> None:
+        if self.principal.tenant_id != self.tenant.id:
+            raise RuntimeError("customer session does not belong to the resolved tenant")

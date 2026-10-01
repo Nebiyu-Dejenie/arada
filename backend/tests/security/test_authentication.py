@@ -18,6 +18,8 @@ PUBLIC = {
     ("POST", "/v1/auth/login"),
     ("POST", "/v1/invitations:accept"),
     ("GET", "/v1/storefront/merchant"),
+    # Phase 2: the customer login itself; every failure is one generic 401.
+    ("POST", "/v1/storefront/auth/telegram"),
 }
 DUMMY = {
     "tenant_slug": "shop-x",

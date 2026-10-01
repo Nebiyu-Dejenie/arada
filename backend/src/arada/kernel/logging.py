@@ -11,7 +11,7 @@ import logging
 import re
 import sys
 from collections.abc import MutableMapping
-from typing import Any
+from typing import Any, TextIO
 
 import structlog
 
@@ -71,7 +71,11 @@ def correlation_processor(
     return event_dict
 
 
-def configure_logging(level: str = "INFO", fmt: str = "json") -> None:
+def configure_logging(
+    level: str = "INFO", fmt: str = "json", *, stream: TextIO | None = None
+) -> None:
+    """Configure structlog. ``stream`` defaults to stdout (tests pass a buffer
+    to inspect exactly what the redacting pipeline emits)."""
     renderer: Any = (
         structlog.processors.JSONRenderer()
         if fmt == "json"
@@ -88,7 +92,7 @@ def configure_logging(level: str = "INFO", fmt: str = "json") -> None:
             renderer,
         ],
         wrapper_class=structlog.make_filtering_bound_logger(logging.getLevelNamesMapping()[level]),
-        logger_factory=structlog.PrintLoggerFactory(file=sys.stdout),
+        logger_factory=structlog.PrintLoggerFactory(file=stream or sys.stdout),
         cache_logger_on_first_use=False,
     )
 
