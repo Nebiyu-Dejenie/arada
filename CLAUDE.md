@@ -66,10 +66,10 @@ Architecture, implementation, database, migration, authorization, tenant isolati
 
 - Phase 0 (discovery and architecture) is complete.
 - Phase 1 (platform kernel) is **APPROVED** (owner, 2026-10-01, at `4896f60`). Do not reopen or redesign it without new evidence of a regression or architectural defect.
-- **Phase 2 = Telegram foundation.** It is authorised to begin, design first. The design in `docs/reports/PHASE_2_PLAN.md` is **APPROVED**. B5 verification is done and reported; implementation (plan §12) may start once the owner has the report. Scope is the owner's ten items only. Webhooks, deep links, notifications, managed bots, frontend and Redis are non-goals.
+- **Phase 2 = Telegram foundation** is **implemented and awaits the owner's review** (`docs/reports/PHASE_2.md`). Outstanding owner actions: the live test-environment sample (A8, `scripts/telegram_sample_check.py`) and the pre-completion docs re-check. Scope stays the owner's ten items. Webhooks, deep links, notifications, managed bots, frontend and Redis are non-goals. **Do not start Phase 3.**
 - Approval is **not** authorisation to deploy: no production DNS, Cloudflare tunnels, exposed services, production credentials or payment integrations. Docker is for development and testing only.
 - ADR-030 is **Deferred**; do not implement it. **AUTH RATE LIMITING = REQUIRED BEFORE PUBLIC EXPOSURE** (register B4). Nothing may be called production-ready until it is implemented and verified.
-- Register B5 is **resolved** (2026-10-01): the Telegram Mini App spec was verified against core.telegram.org (`PHASE_2_PLAN.md` §5, §14; ADR-012). Never derive `bot_id` from the token (A9). Assumption A8 (decoded values, UTF-8) is confirmed only by the owner's live test-environment sample. Re-verify the docs before the Phase 2 completion report.
+- Register B5 is **resolved**. Telegram rules: never derive `bot_id` from the token (A9/D6); never use `initDataUnsafe`; the validator (`arada.telegram.miniapp`) stays pure and implements only the Mini App mechanism, not the Login Widget or OIDC. Every failed Telegram login is one generic 401, with the reason in logs only. Customer sessions are opaque and tenant-bound (ADR-036); never introduce JWT or refresh tokens for them without a new ADR.
 - What exists: `docs/21_IMPLEMENTATION_STATUS.md`.
 
 ## Commands
@@ -89,3 +89,11 @@ Architecture, implementation, database, migration, authorization, tenant isolati
 - Never use `SELECT … FOR UPDATE` on a table where `arada_app` has no UPDATE grant. Serialise with an advisory lock, and put invariants that must survive races in the database (ADR-033).
 - A session never gains privileges in place: rotate the token (ADR-035).
 - Do not call a guarantee "tamper-proof" or claim a scan gate that CI does not enforce. Docs describe what the code and CI actually do.
+
+## Engineering rules learned in Phase 2
+
+- Customer tokens and staff tokens never share a table, a dependency or a principal type. Every new non-storefront route is covered automatically by the OpenAPI-driven customer-token sweep in `tests/security/test_telegram_auth.py`.
+- The RLS lint scans every application schema (`APP_SCHEMAS` in `test_rls_coverage.py`); a new schema must be added there. `TENANT_TABLES` uses schema-qualified names.
+- Give the runtime role column-level UPDATE grants that never include `tenant_id`, binding columns, tokens or expiry.
+- Unauthenticated endpoints commit no database writes on failure. Failures go to logs, not the audit trail (register B4).
+- Never put real Telegram tokens, raw `initData`, signatures or personal data in the repository. Tests generate throwaway keys and fake tokens (`tests/telegram_kit.py`).

@@ -11,7 +11,7 @@ Labels:
 | **Assumed** | A documented assumption (Permanent Command §53) |
 | **Deferred** | Intentionally postponed, with the reason given |
 
-Last updated: 2026-10-01, Phase 1 corrective pass after the source-level audit (awaiting owner review; Phase 2 blocked).
+Last updated: 2026-10-01. Phase 1 is **approved**. Phase 2 (Telegram foundation) is implemented and **awaits owner review**; the live test-environment sample (A8) is outstanding. Nothing is production-ready: **B4 (authentication rate limiting) is open**.
 
 ## Phase 1: platform kernel
 
@@ -19,7 +19,7 @@ Last updated: 2026-10-01, Phase 1 corrective pass after the source-level audit (
 |---|---|---|
 | Project structure: modular monolith with import contracts | Implemented | `backend/src/arada/*`; `lint-imports` in CI |
 | Typed central configuration; `ROOT_DOMAIN` as configuration (TBD) | Implemented | `kernel/config.py`; production guards tested |
-| Database foundation: schema `control`, 9 migrations, least-privilege roles | Implemented | `backend/migrations/`; zero → head → base → head round trip tested |
+| Database foundation: schemas `control` and `commerce` (Phase 2), 10 migrations, least-privilege roles | Implemented | `backend/migrations/`; zero → head → base → head round trip tested |
 | Code/schema drift detection | Implemented | `tests/integration/test_migrations.py` |
 | UUIDv7 identifiers | Implemented | `kernel/ids.py` |
 | Identity: persons, provider identities, argon2id passwords, lockout | Implemented | `identity/`; `tests/api/test_identity.py` |
@@ -56,17 +56,37 @@ Last updated: 2026-10-01, Phase 1 corrective pass after the source-level audit (
 | Local reproduction from zero | Implemented | `scripts/phase1_demo.sh`; runbook |
 | Hot-path data-access optimisation | **Deferred** (owner, 2026-10-01) | ADR-030: root cause not established; revisit conditions recorded |
 
+## Phase 2: Telegram foundation
+
+Evidence and test lists are in `reports/PHASE_2.md`.
+
+| Capability | Status | Evidence / where |
+|---|---|---|
+| Mini App `initData` validator: HMAC (`WebAppData` key) + mandatory Ed25519 + bot binding + freshness, pure module | Implemented | `telegram/miniapp.py`; ADR-012 (Accepted); `tests/unit/test_telegram_miniapp.py` |
+| Telegram environment separation (test or production key; production refuses the test key) | Implemented | `kernel/config.py`; `test_production_refuses_the_test_key_and_any_mismatch` |
+| Conformance with live Telegram data (assumption A8: form decoding, UTF-8) | **Not yet verified** | Owner-run `scripts/telegram_sample_check.py` on a test-environment sample; never committed |
+| Merchant-owned bot binding (admin supplies `bot_id` and token; token envelope-encrypted; no Telegram call) | Implemented | `bots/service.py`; `PUT/GET/DELETE /v1/platform/tenants/{id}/telegram-bot`; D6 |
+| Host → tenant → that tenant's bot (client never names a tenant) | Implemented | `customers/telegram_login.py`; `test_client_supplied_tenant_hints_never_choose_the_tenant` |
+| Telegram identity → global person → per-tenant customer (`commerce.customers`) | Implemented | `identity/telegram.py`, `customers/service.py`; race test |
+| Customer sessions: opaque, server-side, bound to tenant and customer by FORCE RLS | Implemented | ADR-036; `customers/sessions.py`; `access/customer.py` |
+| Replay window per `initData` (reuse window + use cap; our policy) | Implemented | `bots/service.py:record_init_data_use`; concurrent replay test |
+| Generic 401 for every failed Telegram login; reason in logs only | Implemented | D5; `test_every_rejection_is_the_same_generic_401_with_a_logged_reason` |
+| Customer and staff credentials never interchangeable | Implemented | OpenAPI-driven sweep `test_customer_tokens_are_refused_by_every_staff_operation` |
+| Audit: person and customer creation, customer login and logout, bot registration and disabling, with request and trace ids | Implemented | `test_logins_are_audited_inside_the_tenant_with_correlation_ids` |
+| Failure metrics | **Logs only** | No metrics backend exists (deferred with monitoring); failures are `telegram.auth_failed` log events with a `reason` field |
+| Authentication rate limiting on `/v1/storefront/auth/telegram` | **Missing: REQUIRED BEFORE PUBLIC EXPOSURE** | Register B4 applies to this endpoint too |
+
 ## Deliberately not in Phase 1
 
 | Item | Status | Reason / phase |
 |---|---|---|
-| Frontend (Mini App, consoles) | Planned, Phase 2+ | The owner scoped Phase 1 to the platform kernel |
-| Telegram bots, `initData` validation, webhooks | Planned, Phase 2 | Owner: no production bots in Phase 1 |
-| Outbox and inbox (domain events) | Planned, Phase 2 | First consumer arrives with notifications and Telegram |
-| Redis (rate limits, dedupe) | Planned, Phase 2 | Not needed until webhooks and rate limiting |
+| Frontend (Mini App, consoles) | Planned, later phase (a Phase 2 non-goal) | The owner scoped Phases 1 and 2 to the backend |
+| Telegram webhooks, deep links, notifications, managed bots, outbound Bot API calls | **Not in Phase 2 either** (owner's non-goals) | `reports/PHASE_2_PLAN.md` §3 |
+| Outbox and inbox (domain events) | Planned, with webhooks or notifications | No Phase 2 consumer exists |
+| Redis (rate limits, dedupe) | Not introduced (Phase 2 non-goal) | Replay control uses PostgreSQL |
 | Catalog, search, orders, reviews | Planned, Phase 3 | Out of scope |
 | Payments, ledger, commissions, payouts | Planned, Phase 4 | Out of scope; settlement model blocked on U4 |
-| `commerce`, `finance`, `ops` schemas; tenant placement | Planned, Phases 2-4 | Created with their first tables (ADR-003 history) |
+| `finance`, `ops` schemas; tenant placement | Planned, Phases 3-4 | Created with their first tables. `commerce` was created in Phase 2 with `customers` |
 | Blueprint data migrations (plans, preview, rollback of data) | Planned, Phase 6 | No blueprint-bound tenant data exists yet |
 | Passkeys, step-up re-authentication, maker-checker, just-in-time support access, TOTP reset/recovery, per-tenant staff-MFA policy | Planned | ADR-025 / ADR-029 / ADR-035 |
 | Console cookies and CSRF | Planned, with the console UI | No browser surface yet |

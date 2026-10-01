@@ -42,8 +42,11 @@ Status: **Proposed** · OpenAPI 3.1 is generated from the code (FastAPI + Pydant
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/v1/runtime/manifest` | Resolved tenant/vertical/blueprint/theme/flags/locales/permissions. `ETag` = hash(tenant.config_version, blueprint content_hash, release). |
-| POST | `/api/v1/auth/telegram` | Body `{ "init_data": "<raw string>" }` → `{access_token, expires_in, refresh_handle}` |
-| POST | `/api/v1/auth/refresh` | Rotates the refresh handle |
+| POST | `/v1/storefront/auth/telegram` | **As built (Phase 2).** On the merchant's host. Body `{ "init_data": "<raw string>" }` → `{access_token, expires_at}`: an opaque session bound to the host's tenant and the customer (ADR-036). Any validation failure → one generic `401 urn:arada:problem:telegram-auth-failed`; unknown host → 404 |
+| GET | `/v1/storefront/me` | **As built.** The customer's own record (customer token, same host only) |
+| POST | `/v1/storefront/auth/logout` | **As built.** Revokes the customer session |
+| PUT · GET · DELETE | `/v1/platform/tenants/{tenant_id}/telegram-bot` | **As built.** `bots.manage` (MFA-gated). Body `{bot_id, bot_token}`; the token is stored encrypted and never returned. Replace or disable revokes the tenant's customer sessions |
+| ~~POST~~ | ~~`/api/v1/auth/refresh`~~ | **Not built:** superseded by ADR-036 (no refresh handle; the Mini App re-exchanges `initData`) |
 | POST | `/api/v1/auth/staff/login` · `/webauthn/*` · `/totp/verify` · `/step-up` | Staff |
 | POST | `/api/v1/auth/logout` | Revokes the session |
 

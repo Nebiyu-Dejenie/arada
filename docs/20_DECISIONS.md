@@ -27,7 +27,7 @@ This is the project's decision memory (Permanent Command §48). Each ADR lives i
 | [009](adr/ADR-009-dns-provisioning-mode.md) | DNS provisioning mode | Deferred (domain phase) |
 | [010](adr/ADR-010-ingress-tunnel-traefik.md) | Ingress: Cloudflare Tunnel → Traefik, routing in git | Proposed |
 | [011](adr/ADR-011-telegram-managed-bots.md) | Telegram managed bots + BYO fallback | Proposed (verify limits before Phase 2) |
-| [012](adr/ADR-012-miniapp-authentication.md) | Mini App auth: HMAC + Ed25519 + bot binding | Proposed |
+| [012](adr/ADR-012-miniapp-authentication.md) | Mini App auth: HMAC + Ed25519 + bot binding | **Accepted** (owner, 2026-10-01; implemented in Phase 2) |
 | [013](adr/ADR-013-money-minor-units.md) | Money as integer minor units | **Accepted** |
 | [014](adr/ADR-014-double-entry-ledger.md) | Double-entry append-only ledger | **Accepted** |
 | [015](adr/ADR-015-settlement-model.md) | Settlement defaults to merchant-direct | **Accepted** (default); final model at Phase 4 |
@@ -51,6 +51,7 @@ This is the project's decision memory (Permanent Command §48). Each ADR lives i
 | [033](adr/ADR-033-super-admin-invariant-in-database.md) | The last SUPER_ADMIN is guarded by the database | Proposed (implemented 2026-10-01) |
 | [034](adr/ADR-034-rls-for-all-tenant-tables.md) | Every table with a `tenant_id` is under forced RLS | **Accepted** (owner-directed, 2026-10-01) |
 | [035](adr/ADR-035-tenant-mfa-and-session-rotation.md) | MFA for privileged tenant roles; session rotation on MFA | Proposed (implemented 2026-10-01; implements `09` §3) |
+| [036](adr/ADR-036-tenant-bound-customer-sessions.md) | Customer sessions: opaque, server-side, bound to one tenant and customer | Proposed (approved in principle, D4; implemented in Phase 2) |
 
 ## 2. Question register (Permanent Command §53)
 
@@ -77,8 +78,8 @@ This is the project's decision memory (Permanent Command §48). Each ADR lives i
 | A4 | Settlement Model A (merchant-direct) until legal review | ADR-015 | Phase 4 |
 | A5 | Currency ETB (minor-unit exponent 2); locales Amharic + English; time zone `Africa/Addis_Ababa`; Ethiopian calendar as a display option only | `06` | Phase 1 |
 | A6 | Local development uses `*.localhost` hostnames. No public environment exists until the domain is supplied. | ADR-026 | Domain phase |
-| A8 | The `initData` data-check-strings use the **percent-decoded** field values, as received, and HMAC and Ed25519 run over their **UTF-8** bytes. The official docs do not state either. | `PHASE_2_PLAN.md` §5 row 5 | The owner's live test-environment sample, including a non-ASCII name, before Phase 2 is reported complete |
-| A9 | A bot's `bot_id` is **supplied by the platform admin** at registration, not parsed from the token: the docs show the token format only by example. A wrong value fails closed. | `PHASE_2_PLAN.md` §5 row 10, D6 | The owner may choose `getMe` instead, an outbound call that is a current non-goal |
+| A8 | The `initData` data-check-strings use the **percent-decoded** field values, as received, and HMAC and Ed25519 run over their **UTF-8** bytes. The official docs do not state either. **Implemented** in `telegram/miniapp.py` as form decoding (`+` is a space, `%XX` a byte, strict UTF-8, no other normalisation); **not yet confirmed**: the owner's live sample (`scripts/telegram_sample_check.py`) is outstanding. | `PHASE_2_PLAN.md` §5 row 5 | The owner's live test-environment sample, including a non-ASCII name, before Phase 2 is reported complete |
+| A9 | A bot's `bot_id` is **supplied by the platform admin** at registration, not parsed from the token: the docs show the token format only by example. A wrong value fails closed. **Owner decision D6 (2026-10-01): approved**; `getMe` is not called in Phase 2. | `PHASE_2_PLAN.md` §5 row 10, D6 | The owner may choose `getMe` instead, an outbound call that is a current non-goal |
 
 ### UNKNOWN (not blocking yet; asked only when the named phase needs it)
 

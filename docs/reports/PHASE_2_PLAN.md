@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | **Design APPROVED by the owner (2026-10-01) as the working plan, including its non-goals.** B5 (documentation verification) was **completed on 2026-10-01** against core.telegram.org (§14). The verified specification confirms the design without architectural change; four details are corrected (§5). **No code is written yet:** implementation starts only after the owner has received the verification report. |
+| **Status** | Design approved (2026-10-01). **Implemented 2026-10-01; see `PHASE_2.md`.** Awaiting owner review |
 | **Date** | 2026-10-01 |
 | **Baseline** | Phase 1 approved by the owner at `4896f60ad3d159e3a487e1aa56631ead0ed319ba` |
 | **Inputs** | `04_TELEGRAM_ARCHITECTURE.md`, `02_TENANCY.md` §6, `17_API_CONTRACTS.md`, `19_ACCEPTANCE_TESTS.md`, ADR-011, ADR-012, ADR-017, ADR-024, ADR-029, ADR-034, ADR-035, register `20_DECISIONS.md` |

@@ -2,11 +2,11 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Proposed — **specification verified against core.telegram.org on 2026-10-01**; recommended for Accepted at Phase 2 implementation step 1 |
+| **Status** | **Accepted** (owner, 2026-10-01, Phase 2 implementation step 1). Specification verified against core.telegram.org on 2026-10-01; implemented in Phase 2 |
 | **Date** | 2026-09-26 |
 
 ## Decision
-The server validates `initData` with Telegram's documented HMAC-SHA256, **and** the Ed25519 `signature` field against Telegram's published public key, checks that `bot_id` equals the resolved tenant's bot, and enforces `auth_date` freshness. It then issues short-lived, tenant-bound tokens.
+The server validates `initData` with Telegram's documented HMAC-SHA256, **and** the Ed25519 `signature` field against Telegram's published public key, checks that `bot_id` equals the resolved tenant's bot, and enforces `auth_date` freshness. It then issues a session bound to that tenant and customer: opaque and server-side (ADR-036), not a JWT.
 
 ## Context
 Never trust `initDataUnsafe` (Master §11; Permanent §11). HMAC alone can be forged by anyone who holds the bot token.
@@ -19,6 +19,17 @@ Closes impersonation by bot-token holders; ties each session to one merchant.
 
 ## Consequences
 Telegram's public keys are environment configuration (production and test).
+
+## Implementation (Phase 2, 2026-10-01)
+- **Validator.** `backend/src/arada/telegram/miniapp.py` is pure: no database, network or application imports, enforced by an import-linter contract. It implements only the Mini App mechanism. The legacy Login Widget (`SHA256(token)` as the key) and Telegram Login (OIDC and JWT) are different mechanisms; tests prove that neither validates.
+- **Order.** Strict parse, then HMAC, then Ed25519, then content and freshness. A forged request is therefore always counted as forged. Every failure is one generic `401 telegram-auth-failed`; the reason goes to logs only (owner decision D5).
+- **Keys.** The verification key comes only from configuration (`telegram_environment`, `telegram_public_key_hex`). The code holds the SHA-256 **fingerprints** of Telegram's two documented keys (`kernel/config.py:TELEGRAM_KEY_FINGERPRINTS`), only to refuse mismatched configuration:
+  - a known key must match `telegram_environment`;
+  - production requires `telegram_environment = production` and Telegram's production key, so the test key is refused at startup.
+
+  A fingerprint cannot verify anything. If Telegram rotates its key, production fails closed until the docs are re-verified and the fingerprint is updated.
+- **Bot id.** The platform admin supplies it (decision D6, assumption A9) and it is never parsed from the token. A wrong value fails closed.
+- **Assumption A8** (form decoding, UTF-8) is implemented as written in `PHASE_2_PLAN.md` §5 row 5 and documented in the validator. It is confirmed only by the owner's live test-environment sample (`scripts/telegram_sample_check.py`, never committed).
 
 ## Verified specification (2026-10-01)
 Checked against the live official pages, never memory or copies. The full table and the page hashes are in `docs/reports/PHASE_2_PLAN.md` §5 and §14. Sources:
@@ -42,4 +53,5 @@ Requiring Ed25519 in addition to HMAC is **stricter than the documented minimum*
 | Date | Change |
 |---|---|
 | 2026-09-26 | Proposed (Phase 0). |
+| 2026-10-01 | **Accepted** by the owner and implemented in Phase 2 (see Implementation). |
 | 2026-10-01 | B5 resolved. The specification was verified against core.telegram.org and the decision is confirmed. Corrections: `bot_id` is not derived from the token; `signature` padding is accepted either way; `hash` is compared as bytes; `signature` is included in the HMAC string. Ed25519 stays mandatory. The JWT and refresh-token wording in the Decision is superseded, once adopted, by ADR-036's opaque tenant-bound sessions (owner D4). |

@@ -112,6 +112,14 @@ Results feed tenant health (`12` §5).
 
 ## 5. Authentication: `initData` validation (ADR-012)
 
+> **As built in Phase 2 (2026-10-01).** The endpoint is `POST /v1/storefront/auth/telegram`. The algorithm was verified against core.telegram.org (`reports/PHASE_2_PLAN.md` §5, §14). Differences from the text below:
+> - The bot id is registered by the platform admin, never derived from the token (A9).
+> - The `signature` padding is optional.
+> - `signature` is part of the HMAC string.
+> - Every failure is one generic 401; the reasons go to logs only (D5).
+> - Step 6 issues an **opaque, server-side session bound to the tenant and customer** (ADR-036), not a JWT plus refresh handle.
+> - The replay rule is the reuse window and use cap in `PHASE_2_PLAN.md` §9.
+
 The client sends the raw `Telegram.WebApp.initData` string to `POST /api/v1/auth/telegram` on its own tenant host. `initDataUnsafe` is **never** used for authentication or authorization; the client may use it for display only.
 
 The server validates:

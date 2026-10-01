@@ -51,7 +51,19 @@ backend/.venv/bin/python scripts/measure_api.py --state-file /tmp/state.json
 
 Numbers from a developer laptop are **not** sizing numbers (ADR-004 Evidence). Real sizing is measured on the target machines.
 
-## 6. Troubleshooting
+## 6. Telegram Mini App login (Phase 2)
+
+Telegram logins are **off** until a key is configured. Every attempt then fails closed with the generic 401.
+
+- `ARADA_TELEGRAM_ENVIRONMENT=test` and `ARADA_TELEGRAM_PUBLIC_KEY_HEX=<Telegram's test key>`. The key value is in ADR-012; it is public. A key that does not match the environment is refused at startup, and production accepts only Telegram's production key.
+- Bind a **test** bot to a tenant: `PUT /v1/platform/tenants/{id}/telegram-bot` with `{bot_id, bot_token}`, as a platform admin with MFA. Use a bot in Telegram's test environment, never a production bot.
+- **Live conformance check (assumption A8).**
+  1. Open the test bot's Mini App with a test account whose name has non-ASCII characters and a space.
+  2. Copy `Telegram.WebApp.initData`.
+  3. Run `cd backend && uv run python ../scripts/telegram_sample_check.py`. It asks for everything with hidden input and prints verdicts only.
+  4. **Never** paste the sample, the token or the output values into the repository, an issue or a chat.
+
+## 7. Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|

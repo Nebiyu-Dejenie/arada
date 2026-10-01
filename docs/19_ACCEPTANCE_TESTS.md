@@ -21,7 +21,7 @@ SC-1 is first met in Phase 5 through the provisioning service (CLI or admin endp
 | ISO-1 | Auto-generated: for **every** tenant-scoped endpoint in OpenAPI, call it as a tenant A principal with ids belonging to tenant B | 404 for every call; zero B data in any response body (response scanned for B's ids/refs) |
 | ISO-2 | Send `X-Tenant-ID: B` / `tenant_id: B` in body/query on A's host | Ignored; A context only |
 | ISO-3 | Staff of A requests `merchant.ROOT_DOMAIN/api/v1/t/{B-slug}/orders` | 404 |
-| ISO-4 | Tenant A's valid `initData` presented at B's host | 401 (`bot_mismatch`) |
+| ISO-4 | Tenant A's valid `initData` presented at B's host | Generic 401 (logged reason: `bad_hash`, since B's own token is used). *Changed by D5: reasons are never returned to clients.* Test: `test_every_rejection_is_the_same_generic_401_with_a_logged_reason` |
 | ISO-5 | Raw SQL as `arada_app` with `app.tenant_id` = A: `SELECT * FROM commerce.orders WHERE tenant_id = B` | 0 rows |
 | ISO-6 | Raw SQL with **no** `app.tenant_id` set | 0 rows from every tenant table (fail closed) |
 | ISO-7 | Insert `order_items` referencing B's order while in A's context | Rejected (RLS WITH CHECK + composite FK) |
@@ -38,10 +38,10 @@ SC-1 is first met in Phase 5 through the provisioning service (CLI or admin endp
 
 | ID | Test | Expected |
 |---|---|---|
-| AUTH-1 | `initData` with a valid hash but a tampered `user` | 401 `bad_hash` |
-| AUTH-2 | `initData` HMAC-valid (forged with the bot token) but **invalid/missing Ed25519 `signature`** | 401 `bad_signature` |
-| AUTH-3 | `auth_date` older than the max age / more than 60 s in the future | 401 `stale` / `future` |
-| AUTH-4 | Server never reads `initDataUnsafe` (static check + test) | Pass |
+| AUTH-1 | `initData` with a valid hash but a tampered `user` | Generic 401; logged `bad_hash` (D5) |
+| AUTH-2 | `initData` HMAC-valid (forged with the bot token) but **invalid/missing Ed25519 `signature`** | Generic 401; logged `bad_signature` / `malformed` (D5) |
+| AUTH-3 | `auth_date` older than the max age / more than 60 s in the future | Generic 401; logged `stale` / `future` (D5) |
+| AUTH-4 | Server never reads `initDataUnsafe` (static check + test) | Pass. AST-based check over `backend/src`: `test_init_data_unsafe_is_never_used_by_server_code` |
 | AUTH-5 | Telegram webhook with a wrong secret / unknown route key | 401 / 404 |
 | AUTH-6 | Console POST without a CSRF token | 403 |
 | AUTH-7 | 10 failed staff logins | Soft lock + notification; generic errors |
