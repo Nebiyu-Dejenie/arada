@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Proposed |
+| **Status** | Proposed — **specification verified against core.telegram.org on 2026-10-01**; recommended for Accepted at Phase 2 implementation step 1 |
 | **Date** | 2026-09-26 |
 
 ## Decision
@@ -19,3 +19,27 @@ Closes impersonation by bot-token holders; ties each session to one merchant.
 
 ## Consequences
 Telegram's public keys are environment configuration (production and test).
+
+## Verified specification (2026-10-01)
+Checked against the live official pages, never memory or copies. The full table and the page hashes are in `docs/reports/PHASE_2_PLAN.md` §5 and §14. Sources:
+- <https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app>
+- <https://core.telegram.org/bots/webapps#validating-data-for-third-party-use>
+- <https://core.telegram.org/bots/webapps#webappinitdata>
+
+| Rule | Verified detail |
+|---|---|
+| HMAC key | `HMAC_SHA256(key="WebAppData", msg=bot_token)`. Not the Login Widget's `SHA256(bot_token)`, which is a different mechanism |
+| HMAC string | All received fields except `hash`, so it **includes `signature`** and any unknown field. Sorted alphabetically, `key=<value>`, separated by `\n`. `hash` is the hex HMAC, compared as decoded bytes (the docs don't state the letter case) |
+| Ed25519 string | `<bot_id>:WebAppData\n` then all fields except `hash` and `signature`, sorted, `key=<value>`, separated by `\n`. `signature` is base64url (padding not specified, so both forms are accepted) |
+| Public keys | One per environment, Telegram-wide. Test: `40055058a4ee38156a06562e52eece92a771bcd8346a8c4615cb7376eddf72ec`. Production: `e7bf03a2fa4602af4580703d88dda5bb59f32ed8b02a56c187fe7d34caed242d`. They are **configuration** and never in code |
+| Bot binding | Through the `bot_id` in the Ed25519 string, and through the tenant's own token in the HMAC. **The docs do not state that the token prefix is the bot id**, so `bot_id` is registered explicitly (A9) |
+| Freshness and replay | The docs define no maximum age and no replay mechanism, so both are our policy |
+| Not stated | Whether values are percent-decoded before signing, and the byte encoding. Assumption A8 is decoded values over UTF-8 bytes, confirmed by the owner's live test-environment sample |
+
+Requiring Ed25519 in addition to HMAC is **stricter than the documented minimum**. The docs frame Ed25519 for third parties, but list `signature` as a non-optional field.
+
+## History
+| Date | Change |
+|---|---|
+| 2026-09-26 | Proposed (Phase 0). |
+| 2026-10-01 | B5 resolved. The specification was verified against core.telegram.org and the decision is confirmed. Corrections: `bot_id` is not derived from the token; `signature` padding is accepted either way; `hash` is compared as bytes; `signature` is included in the HMAC string. Ed25519 stays mandatory. The JWT and refresh-token wording in the Decision is superseded, once adopted, by ADR-036's opaque tenant-bound sessions (owner D4). |

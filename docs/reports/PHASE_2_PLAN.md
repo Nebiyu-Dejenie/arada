@@ -2,12 +2,12 @@
 
 | Field | Value |
 |---|---|
-| **Status** | **Design APPROVED by the owner (2026-10-01) as the working plan, including its non-goals. Implementation BLOCKED by B5** until the official Telegram docs are verified. Nothing in this document is implemented. |
+| **Status** | **Design APPROVED by the owner (2026-10-01) as the working plan, including its non-goals.** B5 (documentation verification) was **completed on 2026-10-01** against core.telegram.org (§14). The verified specification confirms the design without architectural change; four details are corrected (§5). **No code is written yet:** implementation starts only after the owner has received the verification report. |
 | **Date** | 2026-10-01 |
 | **Baseline** | Phase 1 approved by the owner at `4896f60ad3d159e3a487e1aa56631ead0ed319ba` |
 | **Inputs** | `04_TELEGRAM_ARCHITECTURE.md`, `02_TENANCY.md` §6, `17_API_CONTRACTS.md`, `19_ACCEPTANCE_TESTS.md`, ADR-011, ADR-012, ADR-017, ADR-024, ADR-029, ADR-034, ADR-035, register `20_DECISIONS.md` |
 
-> **Verification gap (register B5).** This plan was written in an environment whose network policy blocks `core.telegram.org` and `telegram.org`, including archived copies. The Telegram behaviour below therefore comes from the repository's own record of the official docs (register K6 and K7, checked 2026-09-26; `04` §5), **not** from a fresh check. Every point marked **[verify]** must be confirmed against the official Mini Apps documentation before the validator is called conformant.
+> **Verification (register B5, resolved 2026-10-01).** This plan was first written in a cloud environment whose network policy blocked `core.telegram.org`. The Telegram behaviour in §5 was then **verified directly against the live official pages on core.telegram.org**, fetched over verified TLS from the developer workstation on 2026-10-01 at 13:26 UTC (§14). No memory, tutorial, archive, blog, framework code or repository record was used as the specification. Where the official text is silent, §5 says so and records the implementation assumption. Those points are confirmed only by the live test-environment sample (§4).
 
 ## 1. Current relevant architecture (as built in Phase 1)
 
@@ -55,23 +55,52 @@ The roadmap's Phase 2 row is broader than the owner's ten items. The following a
 
 | Dependency | Status |
 |---|---|
-| Official Mini Apps docs (algorithm, key values, field list) | **BLOCKED in this environment (B5)**: `core.telegram.org` is denied by network policy |
+| Official Mini Apps docs (algorithm, key values, field list) | **Verified 2026-10-01** (B5 resolved; §5, §14) |
 | Ed25519 and HMAC | `cryptography` 50 (already a dependency) and the standard library. **No new package** |
 | Telegram public keys (production and test) | Configuration only (ADR-012). Never hard-coded; validated as 32-byte hex at startup; required in production |
 | Bot ownership (U5) | Proposed assumption A7: **bring-your-own, merchant-owned bots** for Phase 2 (`04` §2b baseline). Managed bots wait for U6 |
 | Live conformance | One `initData` sample from a **test** bot in Telegram's **test** environment, checked locally by the owner. Never committed: it contains personal data and the repository is public |
 
-## 5. Telegram behaviour this design relies on
+## 5. Telegram behaviour this design relies on (verified 2026-10-01)
 
-All of these points are taken from K7 and `04` §5, and every one is marked **[verify]**:
+**Sources** (full record in §14):
+- **[MA-V]** <https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app>
+- **[MA-3P]** `…/bots/webapps#validating-data-for-third-party-use`
+- **[MA-ID]** `…#webappinitdata`
+- **[MA-U]** `…#webappuser`
+- **[MA-I]** `…#initializing-mini-apps`
+- **[MA-T]** `…#using-bots-in-the-test-environment`
+- **[API]** <https://core.telegram.org/bots/api#authorizing-your-bot> and `#getme`
+- **[LW]** <https://core.telegram.org/widgets/login-legacy#checking-authorization>
+- **[TL]** <https://core.telegram.org/bots/telegram-login#validating-id-tokens>. `/widgets/login` now redirects here.
 
-- The secret key is `HMAC_SHA256(key="WebAppData", msg=bot_token)`. The data-check-string is every field except `hash`, sorted by key, formatted `key=value` and joined with `\n`; `hash` is the lowercase hex HMAC of it.
-- Whether the values in the data-check-string are the **URL-decoded** values.
-- The Ed25519 data-check-string is `"<bot_id>:WebAppData\n"` followed by every field except `hash` and `signature`, sorted and joined the same way. `signature` is base64url without padding.
-- The production and test public key values, which go to configuration.
-- That the bot id equals the numeric prefix of the bot token, `<bot_id>:<secret>`.
-- The `WebAppUser` fields used here: `id`, `first_name`, `last_name`, `language_code`, `is_bot`, and whether `is_bot` can appear in Mini App data.
-- That Telegram defines no maximum age for `auth_date`, so the maximum age is our policy.
+**Status labels:**
+- **VERIFIED:** the official text states it.
+- **VERIFIED (implied):** it follows necessarily from the official text.
+- **NOT STATED:** the official text is silent, so the implementation assumption is recorded and the live test sample confirms it.
+- **NOT DOCUMENTED:** the plan's assumption has no official basis and is replaced.
+
+| # | Point | Official text (abridged; quotes are verbatim) | Status | Design consequence |
+|---|---|---|---|---|
+| 1 | Input | Send "the data from the *Telegram.WebApp.initData* field to the bot's backend. The data is a query string, which is composed of a series of field-value pairs" [MA-V]. `initDataUnsafe`: "WARNING: Data from this field should not be trusted. You should only use data from initData on the bot's server and only after it has been validated" [MA-I] | VERIFIED | Unchanged: raw string only; AUTH-4 |
+| 2 | HMAC secret key | "the secret key, which is the HMAC-SHA-256 signature of the bot's token with the constant string `WebAppData` used as a key" [MA-V] | VERIFIED | `secret_key = HMAC_SHA256(key=b"WebAppData", msg=bot_token)` |
+| 3 | HMAC check | "comparing the received *hash* parameter with the hexadecimal representation of the HMAC-SHA-256 signature of the **data-check-string** with the secret key" [MA-V] | VERIFIED | `hash` must equal `HMAC_SHA256(key=secret_key, msg=dcs)` in hex. **Letter case is not stated**, so decode `hash` as exactly 64 hex characters and compare the 32 bytes in constant time |
+| 4 | HMAC data-check-string | "a chain of all received fields, sorted alphabetically, in the format `key=<value>` with a line feed character (0x0A) used as separator". `hash` is "a hash of all passed parameters" [MA-V, MA-ID] | VERIFIED; exclusion of `hash` **VERIFIED (implied)** | Every received field **except `hash`**, **including `signature`** and any field unknown to us (Bot API 10.1 added `chat_join_request_query_id` in June 2026), sorted by key in code-point order, joined with `\n`. The parser must never drop unrecognised fields |
+| 5 | Value form | The data is a query string. The data-check-string uses `key=<value>`; "Complex data types are represented as JSON-serialized objects" [MA-V] | **NOT STATED** whether values are percent-decoded, how `+` is treated, or the byte encoding | **Assumption A8:** decode the query string once, strictly; use the decoded values verbatim (not re-serialised JSON); compute HMAC and Ed25519 over the **UTF-8** bytes. Confirm with the live sample, including a non-ASCII (Amharic) display name and a name containing a space |
+| 6 | Ed25519 | "the received *signature* parameter, which is the base64url-encoded representation of the Ed25519 signature of the **data-check-string**. The verification is performed using the public key provided by Telegram" [MA-3P] | VERIFIED | Ed25519 verify with the configured Telegram key. **Padding is not stated**, so accept base64url with or without `=` padding, reject any other alphabet, and require exactly 64 decoded bytes. *Corrects §5 of the first draft*, which said "without padding" |
+| 7 | Ed25519 data-check-string | "1. Prepend the *bot_id*, followed by `:` and the constant string `WebAppData`. 2. Add a line feed character (0x0A). 3. Append all received fields (except *hash* and *signature*), sorted alphabetically, in the format `key=<value>`. 4. Separate each key-value pair with a line feed character (0x0A)." Example: `'12345678:WebAppData\nauth_date=<auth_date>\nquery_id=<query_id>\nuser=<user>'` [MA-3P] | VERIFIED | `f"{bot_id}:WebAppData\n" + "\n".join(sorted k=v, excluding hash and signature)` |
+| 8 | Public keys | "Test environment: `40055058a4ee38156a06562e52eece92a771bcd8346a8c4615cb7376eddf72ec` (hex). Production: `e7bf03a2fa4602af4580703d88dda5bb59f32ed8b02a56c187fe7d34caed242d` (hex)" [MA-3P] | VERIFIED (public values) | Configuration, not code. One environment per deployment (`telegram_environment`: `production` or `test`). Production settings refuse the test key. The test environment "is completely separate from the main environment", with its own user accounts and bots [MA-T] |
+| 9 | Public key and bot relationship | The keys are Telegram-wide, one per environment, not per bot. The bot is bound by the *bot_id* inside the signed string: give the third party "the data … and your *bot_id*" [MA-3P] | VERIFIED | Unchanged: the resolved tenant's `bot_id` goes into the signed string, and HMAC uses that tenant's token |
+| 10 | bot_id versus the token | Tokens are shown only by example ("looks something like `123456:ABC-…`", an illustrative value) [API]. A bot's identity is returned by `getMe` as a `User` object [API] | **NOT DOCUMENTED** that the numeric prefix is the bot id | **Changed:** never derive `bot_id` from the token. The platform admin supplies `bot_id` explicitly when registering a bot (assumption A9; the alternative, calling `getMe`, is an outbound call and a Phase 2 non-goal). A wrong `bot_id` fails closed: the Ed25519 check rejects every login, and no forged data is accepted |
+| 11 | Fields | `auth_date` (Integer, "Unix time when the form was opened"), `hash` and `signature` ("A signature of all passed parameters (except hash)") are listed **without** "Optional". `user` is **Optional** [MA-ID] | VERIFIED | `hash`, `signature` and `auth_date` are required. A missing `user` gives `malformed` (there is no one to authenticate) |
+| 12 | User fields | `id`: "at most 52 significant bits". `first_name` is required. `last_name`, `username`, `language_code` and `photo_url` are optional. **`is_bot`: "Returns in the receiver field only"** [MA-U] | VERIFIED | Accept `id` only as a positive integer < 2^53, stored as the identity subject (text). *Corrects the draft:* `is_bot` never appears in `user`. A `true` there is treated as `malformed` (defensive), not as a documented case. `receiver` and `chat` are never used for identity |
+| 13 | Freshness | "To prevent the use of outdated data, you can additionally check the *auth_date* field" [MA-V]; a third party "should additionally validate" it [MA-3P]. **No maximum age is defined** | VERIFIED | The maximum age (1 h) and future skew (60 s) are **our policy**, as planned |
+| 14 | Replay | The official text documents only `auth_date` freshness. `query_id` is optional and exists for `answerWebAppQuery`; it is not a nonce [MA-ID] | VERIFIED (absence) | The reuse window and use cap in §9 are **our policy**; `query_id` is not used for replay control |
+| 15 | Launch modes | WebAppInitData "is empty if the Mini App was launched from a keyboard button or from inline mode" [MA-ID] | VERIFIED | Storefront login works only for launches that carry `initData`: menu button, main Mini App, inline button, direct link, attachment menu. Keyboard-button and inline-mode launches get the generic 401. This constrains the later bot-configuration work (a non-goal here) |
+| 16 | Other Telegram mechanisms | Legacy Login Widget: `secret_key = SHA256(<bot_token>)` [LW]. New Telegram Login: OpenID Connect, an authorization-code flow (PKCE), and an `id_token` JWT validated against JWKS with `iss = https://oauth.telegram.org` and `aud` = Bot ID [TL] | VERIFIED | **Different derivations; never mix them.** The validator implements only the Mini App algorithm (key `WebAppData`). The JWKS and OIDC flows are for web and app login, not Mini Apps, and are out of scope. A future web storefront login would be a separate ADR |
+| 17 | Test vectors | The official pages publish **no** test vectors; the examples are placeholders | VERIFIED (absence) | Unit vectors are generated in-test (throwaway Ed25519 key, fake token). They prove our logic matches *our reading*. **Conformance with Telegram is proven only by the live test-environment sample** (§4), which is never committed |
+
+**Ed25519 is required for every login.** The official text frames it for third-party use and makes HMAC sufficient for the bot's own backend. Requiring both is **stricter** than the documented minimum, which the official text permits. It closes forgery by anyone holding the token (a BYO merchant, or a leaked token). Because `signature` is not marked optional, every conforming client sends it.
 
 ## 6. Security boundaries
 
@@ -95,7 +124,7 @@ Client (untrusted)                       Server
 - **Customer sessions are bound to their tenant by the database.** `customer_sessions` is under FORCE RLS and is looked up only inside the Host-resolved tenant's context, so tenant A's token is invisible at tenant B's host.
 - **Bot tokens are never exposed.** They are sealed with AAD `telegram_bots|<row>|<tenant>|bot_token`, decrypted only in memory for the HMAC check, never returned, logged or put in an error, and covered by a log-redaction test.
 - **Raw `initData` is never logged or stored.** Only a SHA-256 digest of its `hash` is stored, for replay control.
-- **Input limits.** The body limit already applies. `init_data` is capped at 4 KiB; duplicate keys, non-UTF-8 and invalid percent-encoding are rejected; `auth_date` must be an integer; and `user` must be a JSON object with an integer `id`.
+- **Input limits.** The body limit already applies. `init_data` is capped at 4 KiB. Duplicate keys, non-UTF-8 and invalid percent-encoding are rejected. `auth_date` must be an integer. `user` must be a JSON object with an integer `id` (0 < id < 2^53) and a `first_name`. `hash` must be exactly 64 hex characters. `signature` must be base64url (padding optional) that decodes to exactly 64 bytes (§5 rows 3, 6, 12).
 
 ## 7. Database changes (migration 0010; raw SQL, FORCE RLS, composite FKs)
 
@@ -115,7 +144,7 @@ All four tables carry `tenant_id`, so the RLS lint and the per-table SQL isolati
 | POST | `/v1/storefront/auth/telegram` | none (Host-resolved tenant) | Body `{"init_data": "<raw string>"}` → `{access_token, expires_at}`. Unknown host → 404; any validation failure → generic 401 |
 | GET | `/v1/storefront/me` | customer token on the same host | Returns the caller's own customer record only. It is the one protected endpoint that proves the whole chain end to end |
 | POST | `/v1/storefront/auth/logout` | customer token | Revokes the session |
-| PUT | `/v1/platform/tenants/{tenant_id}/telegram-bot` | staff, `bots.manage` (MFA-gated platform scope) | Body `{bot_token}`. Binds or replaces the BYO bot; stores `telegram_bot_id` from the token prefix [verify]; audited; never echoes the token. Replacing a bot revokes the tenant's customer sessions |
+| PUT | `/v1/platform/tenants/{tenant_id}/telegram-bot` | staff, `bots.manage` (MFA-gated platform scope) | Body `{bot_id, bot_token}`. Binds or replaces the BYO bot. **`bot_id` is supplied explicitly** (a positive integer), because the official docs do not state that the token prefix is the bot id (§5 row 10, A9). Audited; never echoes the token. Replacing a bot revokes the tenant's customer sessions |
 | GET / DELETE | same path | staff, `bots.manage` | Status (id, username if known, status) / disable |
 
 **Deviation from `04` §5 and `17` (proposed ADR-036).** These are opaque, server-stored, tenant-bound customer sessions (idle 30 min, absolute 12 h, configurable), **not** an EdDSA JWT plus refresh handle. The reasons:
@@ -129,12 +158,17 @@ All new routes enter the ADR-032 OpenAPI security sweep. New tenant-scoped route
 
 ## 9. Validation and replay policy
 
-1. **Parse strictly.** A missing `hash`, `signature`, `auth_date` or `user`, a duplicate key, or a bad encoding gives `malformed`.
-2. **HMAC.** Compare in constant time with the tenant's token; failure gives `bad_hash`.
-3. **Ed25519.** Verify with the configured key and the tenant's `bot_id`; failure gives `bad_signature`.
+1. **Parse strictly.** Any of these gives `malformed`:
+   - a missing `hash`, `signature`, `auth_date` or `user`, which includes the empty `initData` of keyboard-button and inline-mode launches (§5 row 15);
+   - a duplicate key or a bad encoding;
+   - a malformed `hash` or `signature`.
+
+   Every received field is kept, known or not, for the data-check-strings (§5 row 4).
+2. **HMAC.** Build the data-check-string from every field except `hash` (so `signature` is included), compute it with the tenant's token, and compare the 32 decoded bytes in constant time. Failure gives `bad_hash`.
+3. **Ed25519.** Build the string as `<bot_id>:WebAppData\n` plus every field except `hash` and `signature`, then verify it with the deployment's configured key and the tenant's registered `bot_id`. Failure gives `bad_signature`.
 4. **Freshness.** `auth_date` must be no older than `TELEGRAM_INIT_DATA_MAX_AGE` (default 1 h), otherwise `stale`. It must be no more than 60 s in the future, otherwise `future`.
 5. **Replay.** The first use of a given `hash` records the use. Later bootstraps are allowed only within `TELEGRAM_INIT_DATA_REUSE_WINDOW` (default 10 min) of that first use (Mini App reloads) and only up to `TELEGRAM_INIT_DATA_MAX_USES` (default 20); otherwise `replayed`. Concurrent first uses are settled by the primary key (`INSERT … ON CONFLICT`). Expired rows are pruned opportunistically on insert, so there is no scheduler.
-6. **User checks.** A `user.is_bot` that is true, or a disabled person, gives `user_rejected`.
+6. **User checks.** A disabled person gives `user_rejected`. A `user.is_bot` that is true is treated as `malformed`: the docs say `is_bot` appears only in `receiver` (§5 row 12). Only `user` is ever used for identity, never `receiver` or `chat`.
 
 Crypto runs before freshness so a stale but forged request is counted as forged. The client sees the same answer either way.
 
@@ -149,8 +183,13 @@ Crypto runs before freshness so a stale but forged request is counted as forged.
 - A signature from the test key is rejected under the production key.
 - Stale and future `auth_date` fail, and so does a non-integer one.
 - Oversized input, bad percent-encoding and non-UTF-8 fail.
-- Extra unknown fields stay covered by the hash.
-- Hash case and padding variants behave as specified.
+- Extra unknown fields stay covered by the hash. A vector containing `chat_join_request_query_id` (added in Bot API 10.1) is validated without code changes.
+- Removing `signature` from the HMAC string breaks the HMAC (it is covered), and including it in the Ed25519 string breaks the signature.
+- Upper- and lower-case `hash` both verify; a 63- or 65-character `hash` fails.
+- `signature` with and without `=` padding verifies; a standard-alphabet (`+` or `/`) or 63-byte signature fails.
+- Non-ASCII values (an Amharic `first_name`) and values containing a space or a `+`: the encoding assumption (A8) is checked against our own reading and **confirmed only by the live sample**.
+- A missing `user`, empty `initData`, and a `user.id` of 2^53 or more fail.
+- The Login Widget derivation (`SHA256(token)` as the key) never validates Mini App data (§5 row 16).
 
 **Integration (real PostgreSQL):**
 - Concurrent first logins of one Telegram user create one person and one identity.
@@ -182,10 +221,11 @@ Crypto runs before freshness so a stale but forged request is counted as forged.
 
 | Risk | Mitigation or status |
 |---|---|
-| Algorithm or key details differ from current Telegram docs | **B5**: verify before calling it conformant; the owner checks a live test-environment sample; keys are configuration |
+| Algorithm or key details differ from current Telegram docs | **B5 resolved:** verified against core.telegram.org on 2026-10-01 (§5, §14). The NOT STATED points (value decoding, UTF-8, hex case, padding) are confirmed only by the owner's live test-environment sample. Keys are configuration. Re-check the docs before Phase 2 is declared complete, because the page changes often (four Mini App updates in 2026) |
 | Captured `initData` is replayed within its window | The short reuse window and use cap; sessions are tenant-bound; TLS in transit; no logging |
 | The unauthenticated endpoint creates persons and customers | Only after HMAC **and** a Telegram signature, so an attacker needs real Telegram accounts. **B4 rate limiting is still required before exposure** |
 | A BYO bot token leaks | The Ed25519 requirement blocks impersonation. Replacement revokes sessions. Rotation is a merchant task |
+| A merchant revokes or regenerates the token in @BotFather (the docs say a token "can also be revoked at any time") | The HMAC no longer matches, so logins fail closed with the generic 401 until the platform admin re-registers the bot. Existing customer sessions are unaffected until they expire, or are revoked by re-registration |
 | Clock skew | A 60 s future tolerance; host NTP is an ops requirement |
 | Privacy of Telegram data | Only the user id (as an identity subject) and a display name are stored. Username, photo and phone are not. Merchants see only their own customer rows |
 | `customers` is the first `commerce` table | Kept minimal; Phase 3 extends it through a new migration |
@@ -193,7 +233,7 @@ Crypto runs before freshness so a stale but forged request is counted as forged.
 
 ## 12. Implementation order (after approval)
 
-1. ADR-036 (customer sessions); ADR-012 to Accepted; register A7 (U5) and B5; `04`, `17` and `19` text updates.
+1. ADR-036 (customer sessions); ADR-012 to Accepted; register A7 (U5), A8 and A9 (B5 is already resolved); `04`, `17` and `19` text updates. Add configuration for `telegram_environment` (`production` or `test`) and the matching Ed25519 public key, validated as 32-byte hex at startup; production refuses the test key.
 2. Migration 0010 and table mirrors, with the RLS lint and SQL isolation tests for the new tables.
 3. `arada.telegram.init_data` (the pure validator) with unit tests, sabotage proof and an import contract.
 4. Bot registration (platform, `bots.manage`): sealing, audit and tests.
@@ -208,11 +248,29 @@ Crypto runs before freshness so a stale but forged request is counted as forged.
 | # | Decision | Outcome |
 |---|---|---|
 | D1 | Plan and non-goals | **Approved** as the working plan |
-| D2 | Telegram documentation | **Fresh verification against core.telegram.org required.** Memory, tutorials, archives, blogs, framework code and the repository's own record (K7) are **not** acceptable substitutes. Still blocked (B5): access was re-checked on 2026-10-01 and the network policy still denies the host |
+| D2 | Telegram documentation | **Fresh verification against core.telegram.org required.** Memory, tutorials, archives, blogs, framework code and the repository's own record (K7) are **not** acceptable substitutes. **Done 2026-10-01** from the developer workstation (§5, §14); B5 resolved |
+| D6 | Source of `bot_id` | **Proposed default (A9): the admin supplies `bot_id` with the token**, because the docs do not state that the token prefix is the bot id (§5 row 10). The alternative, calling `getMe` at registration, is an outbound Telegram call, which is a Phase 2 non-goal, so it would need owner approval. Either way, a wrong `bot_id` fails closed |
 | D3 | Bot ownership (U5) | **Approved:** merchant-owned, bring-your-own bots for Phase 2 |
 | D4 | Customer sessions | **Approved in principle:** opaque, server-side sessions tied to one tenant and one customer, subject to the final ADR-036 review. ADR-036 becomes authoritative over the JWT and refresh-handle text in `04` §5 and `17` once adopted |
 | D5 | Failure responses | **Approved:** generic 401 to the client. Reason categories go to controlled logs and metrics only. Raw `initData`, tokens, secrets and sensitive personal data are never logged |
 
 Also approved: the tenant is derived server-side from the merchant host; a client-supplied tenant is never an authorisation boundary; the layers stay separate; customer authentication grants no business authorisation by itself; and every customer session lookup and resource access is tenant-scoped server-side.
 
-**Next step:** once `core.telegram.org` is reachable, verify §5 point by point, record the official URLs and sections, update this plan and ADR-012, and report before writing any code.
+**Next step:** the verification report has gone to the owner. Implementation (§12) starts after that, with D6 defaulting to A9 unless the owner decides otherwise. The live test-environment sample (§4) is the conformance check for the NOT STATED points in §5. Nothing is production-ready while B4 is open.
+
+## 14. Verification record (B5)
+
+- **When and how.** 2026-10-01, 13:26 UTC. Pages were fetched with `curl` over TLS, checking the certificate (`CN=*.telegram.org`, issued by GoDaddy, valid until 2027-03-11; the server was 149.154.167.99), then read in full as HTML. No cached, archived, third-party or repository copy was used. **No copy of the pages is stored in the repository**: only the URLs, the anchors used and the SHA-256 of what was read, so a later reader can tell whether a page has changed.
+- **No secrets or personal data.** Nothing was sent to Telegram; no bot token, `initData` or account was used.
+
+| Page (official URL) | Sections used | SHA-256 of the HTML read |
+|---|---|---|
+| <https://core.telegram.org/bots/webapps> (title "Telegram Mini Apps"; latest change entry "June 11, 2026, Bot API 10.1") | `#validating-data-received-via-the-mini-app`, `#validating-data-for-third-party-use`, `#webappinitdata`, `#webappuser`, `#initializing-mini-apps` (`initData` and `initDataUnsafe` rows), launch-mode sections (`#keyboard-button-mini-apps` … `#launching-mini-apps-from-the-attachment-menu`), `#using-bots-in-the-test-environment`, `#recent-changes` | `fa48a6f43201d198c66b174b5b2b0d0f8716c85cda242b3cd9eeae63ba5eb457` |
+| <https://core.telegram.org/bots/api> | `#authorizing-your-bot` (token format, by example only), `#getme` | `8cebefd685630192d9921e951b08610e34be4676b0e1b1a9b51abc4b81c43037` |
+| <https://core.telegram.org/bots/features> | `#botfather` (token generation; token shown by example only) | `238b0c19aa383c795fe5e86a562a7fedb80f57b45fde2c2dd8e5c3cb565de196` |
+| <https://core.telegram.org/bots/tutorial> | `#obtain-your-bot-token` (linked from the validation text) | `da4f395649996fe260d25258c25a1d06406fa79aec946c70c183c94ef4197321` |
+| <https://core.telegram.org/widgets/login-legacy> | `#checking-authorization` (legacy widget derivation) | `e4b2690ee928b180884e93f4e1a762a5d3e669b408644e5a31194e3a01f71ba2` |
+| <https://core.telegram.org/widgets/login> → redirects to <https://core.telegram.org/bots/telegram-login> | `#openid-connect`, `#validating-id-tokens`, `#signing-algorithm` | `ece1bb32541f669d68880e93e30000cd0037b442f07c42b612445b73f143bf75` |
+
+These pages are updated often. Re-verify before the Phase 2 completion report and whenever a Bot API release note touches Mini Apps.
+
