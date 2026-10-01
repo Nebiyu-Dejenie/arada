@@ -65,9 +65,11 @@ Architecture, implementation, database, migration, authorization, tenant isolati
 ## Current status
 
 - Phase 0 (discovery and architecture) is complete.
-- Phase 1 (platform kernel): the owner accepted the source audit as "approved with fixes". The corrective pass (ADR-033/034/035) is implemented and **awaits the owner's review**.
-- **Phase 2 is BLOCKED** until the owner explicitly approves it. Do not start it.
-- ADR-030 is **Deferred**; do not implement it. **Authentication rate limiting is REQUIRED BEFORE PUBLIC EXPOSURE** (register B4).
+- Phase 1 (platform kernel) is **APPROVED** (owner, 2026-10-01, at `4896f60`). Do not reopen or redesign it without new evidence of a regression or architectural defect.
+- **Phase 2 = Telegram foundation.** It is authorised to begin, design first. The plan is `docs/reports/PHASE_2_PLAN.md`, and it **awaits owner approval before implementation**. Scope is the owner's ten items only. Webhooks, deep links, notifications, managed bots, frontend and Redis are non-goals.
+- Approval is **not** authorisation to deploy: no production DNS, Cloudflare tunnels, exposed services, production credentials or payment integrations. Docker is for development and testing only.
+- ADR-030 is **Deferred**; do not implement it. **AUTH RATE LIMITING = REQUIRED BEFORE PUBLIC EXPOSURE** (register B4). Nothing may be called production-ready until it is implemented and verified.
+- Register B5: official Telegram docs are unreachable from the agent environment. Do not call Telegram validation conformant until it is verified against them.
 - What exists: `docs/21_IMPLEMENTATION_STATUS.md`.
 
 ## Commands
