@@ -65,8 +65,10 @@ Architecture, implementation, database, migration, authorization, tenant isolati
 ## Current status
 
 - Phase 0 (discovery and architecture) is complete.
-- Phase 1 (platform kernel) is implemented and verified, and **awaits the owner's review**. Do not start Phase 2 without it.
-- What exists: `docs/21_IMPLEMENTATION_STATUS.md`. Open proposal: ADR-030.
+- Phase 1 (platform kernel): the owner accepted the source audit as "approved with fixes". The corrective pass (ADR-033/034/035) is implemented and **awaits the owner's review**.
+- **Phase 2 is BLOCKED** until the owner explicitly approves it. Do not start it.
+- ADR-030 is **Deferred**; do not implement it. **Authentication rate limiting is REQUIRED BEFORE PUBLIC EXPOSURE** (register B4).
+- What exists: `docs/21_IMPLEMENTATION_STATUS.md`.
 
 ## Commands
 
@@ -81,3 +83,7 @@ Architecture, implementation, database, migration, authorization, tenant isolati
 - Every new tenant-scoped route must be added to `SAMPLE_BODIES` in `tests/security/test_tenant_isolation.py`, or CI fails.
 - Tenant-owned tables get FORCE RLS plus composite `(tenant_id, …)` foreign keys; cross-tenant lookups only through narrow SECURITY DEFINER resolvers.
 - Migrations are raw SQL, never import app code; frozen seed data lives in the migration; code mirrors are checked by tests.
+- Every table with a `tenant_id` column is under FORCE RLS; the RLS lint (`tests/security/test_rls_coverage.py`) fails CI otherwise. New RLS-bypassing reader uses must be added to the allow-list test.
+- Never use `SELECT … FOR UPDATE` on a table where `arada_app` has no UPDATE grant. Serialise with an advisory lock, and put invariants that must survive races in the database (ADR-033).
+- A session never gains privileges in place: rotate the token (ADR-035).
+- Do not call a guarantee "tamper-proof" or claim a scan gate that CI does not enforce. Docs describe what the code and CI actually do.

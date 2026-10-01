@@ -2,7 +2,7 @@
 
 Status: **Proposed** · Related: ADR-002, ADR-003, ADR-013, ADR-022 · Engine: PostgreSQL 17+
 
-> **As built in Phase 1 (2026-09-26):** a single schema, `control`, with 7 migrations. Tenant-owned rows under FORCE RLS: `merchant_profiles`, `tenant_memberships`, `tenant_membership_roles`, `tenant_invitations`, `tenant_invitation_roles` and `audit_events`. Memberships live in the control plane, not `commerce` (ADR-003 history). The runtime roles are those in §2 plus **`arada_resolver`** (NOLOGIN; owns the two cross-tenant resolver functions). Verticals use `name_en`/`name_am` columns rather than JSON. The `commerce`, `finance` and `ops` schemas are created with their first tables. The rest of this document is the target model.
+> **As built in Phase 1 (2026-09-26; corrective pass 2026-10-01):** a single schema, `control`, with 9 migrations. **Every table with a `tenant_id` is under FORCE RLS**: `merchant_profiles`, `tenant_memberships`, `tenant_membership_roles`, `tenant_invitations`, `tenant_invitation_roles` and `audit_events` (migration 0006/0002), plus `domains`, `tenant_blueprint_assignments` and `feature_flag_overrides` since migration 0009 (ADR-034). Host → tenant resolution goes through the resolver `control.resolve_storefront_host`. The last SUPER_ADMIN is guarded by a trigger (migration 0008, ADR-033). Memberships live in the control plane, not `commerce` (ADR-003 history). The runtime roles are those in §2 plus **`arada_resolver`** (NOLOGIN; owns the three cross-tenant resolver functions). `arada_platform_reader` is used only by `audit.list_platform` and `flags.list_flags`, and a test enforces that allow-list. Verticals use `name_en`/`name_am` columns rather than JSON. The `commerce`, `finance` and `ops` schemas are created with their first tables. The rest of this document is the target model.
 
 ## 1. Conventions (all tables)
 
@@ -152,7 +152,7 @@ erDiagram
 - Every migration ships with:
   - an upgrade test on an empty database
   - an upgrade test on a production-shaped fixture
-  - the RLS policy check
+  - the RLS policy check (as built: `tests/security/test_rls_coverage.py::test_every_table_with_a_tenant_id_is_under_forced_rls`, which reads the migrated catalogue on every CI run. It was added 2026-10-01; before that, no such check existed)
   - a `lock_timeout` guard (`SET lock_timeout = '5s'`)
   - `CONCURRENTLY` for index builds on large tables
 - Down-migrations are written where practical, but the recovery plan is **roll forward** plus point-in-time recovery for data (`13`).

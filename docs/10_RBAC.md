@@ -2,7 +2,7 @@
 
 Status: **Proposed** · Related: ADR-025 · Phase 1
 
-> **As built in Phase 1 (2026-09-26):** the catalogue uses the charter's permission names (`products.*`, `payments.capture`, `finance.payout`, `users.*`, `staff.*`, `blueprints.*`, `tenants.*`, …). The seeded system roles are the charter's eleven. `PLATFORM_OPS`, `DELIVERY_AGENT`, `SERVICE_PROVIDER` and `CUSTOMER` are **not seeded yet** (ADR-025 history). Implemented: scoped grants, MFA-gated privileged scopes, the subset rule, no self-modification, last-owner and last-super-admin protection. Step-up re-authentication, maker–checker, just-in-time support grants and single-operator mode are **Planned**.
+> **As built in Phase 1 (2026-09-26):** the catalogue uses the charter's permission names (`products.*`, `payments.capture`, `finance.payout`, `users.*`, `staff.*`, `blueprints.*`, `tenants.*`, …). The seeded system roles are the charter's eleven. `PLATFORM_OPS`, `DELIVERY_AGENT`, `SERVICE_PROVIDER` and `CUSTOMER` are **not seeded yet** (ADR-025 history). Implemented: scoped grants, MFA-gated privileged scopes, the subset rule, no self-modification, and last-owner protection. **Corrected 2026-10-01:** the last-super-admin protection claimed here did not work. Revoking any SUPER_ADMIN failed, and no test covered it. It is now enforced by a database trigger, with concurrency tests (ADR-033). TENANT_OWNER, TENANT_ADMIN and TENANT_FINANCE now need an MFA-verified session. TENANT_MANAGER and TENANT_STAFF do not (ADR-035). Step-up re-authentication, maker–checker, just-in-time support grants and single-operator mode are **Planned**.
 
 ## 1. Model: scoped roles
 

@@ -19,3 +19,9 @@ Immediate revocation (logout, disabled person), no token material in the databas
 
 ## Consequences
 One indexed lookup per request (see ADR-030). When the console UI lands, the same sessions move to `__Host-` cookies with CSRF tokens (09_SECURITY.md §3). Passkeys, step-up re-authentication and device management are Planned. Per-IP rate limiting is Deferred to the edge (Cloudflare) and Redis; per-account lockout is implemented.
+
+## History
+| Date | Change |
+|---|---|
+| 2026-09-26 | Implemented in Phase 1. |
+| 2026-10-01 | Corrective pass (ADR-035). Confirming TOTP rotates the session instead of upgrading the token in place, and the new token is capped at the old absolute expiry. TENANT_OWNER, TENANT_ADMIN and TENANT_FINANCE need an MFA-verified session. **Authentication rate limiting is REQUIRED BEFORE PUBLIC EXPOSURE** (register B4): lockout per account only; argon2id cost per attempt is a resource-exhaustion vector. |

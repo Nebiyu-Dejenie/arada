@@ -93,6 +93,17 @@ main:      same + e2e (Playwright vs compose stack) + Trivy image scan → push 
 release:   tag CalVer YYYY.MM.N → deploy to staging (auto) → smoke tests → manual approval → production rollout
 ```
 
+> **As built (2026-10-01):** CI (`.github/workflows/ci.yml`) runs:
+> - ruff (lint, including its `S` security rules, and format);
+> - mypy `--strict` and import-linter;
+> - pytest on real PostgreSQL: unit, integration, API, isolation and security suites, including the RLS policy check;
+> - pip-audit on runtime dependencies;
+> - gitleaks over the full history;
+> - a fresh-stack reproduction (`scripts/phase1_demo.sh`);
+> - a Trivy **image** scan that fails only on **CRITICAL** findings with a fix available.
+>
+> Not in CI yet: Semgrep or Bandit SAST, the no-`ports:` check, IaC scanning, SBOM, e2e, and push by digest. Redis does not exist yet.
+
 **Deploy is pull-based** from private infrastructure. A self-hosted runner, or an Ansible job on a deploy host, pulls the release by digest. Nothing on the internet can push into production, and no inbound ports are required.
 
 **Rollout steps:**

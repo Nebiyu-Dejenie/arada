@@ -19,7 +19,7 @@ docker compose exec -e ARADA_BOOTSTRAP_PASSWORD='<a strong password>' api \
   arada admin bootstrap-superadmin --username owner --display-name "Platform Owner"
 ```
 
-Then log in (`POST /v1/auth/login`), enrol TOTP (`POST /v1/me/mfa/totp` and `/confirm`), and log in again with a code. **Platform permissions are withheld until the session is MFA-verified.** API docs: `http://127.0.0.1:58000/docs` (off in production).
+Then log in (`POST /v1/auth/login`) and enrol TOTP (`POST /v1/me/mfa/totp`, then `/confirm`). **`/confirm` returns a new token and revokes the old one; use the new token from then on.** Later logins need the TOTP code. **Platform and vertical permissions, and TENANT_OWNER / TENANT_ADMIN / TENANT_FINANCE permissions, are withheld until the session is MFA-verified.** API docs: `http://127.0.0.1:58000/docs` (off in production).
 
 ## 3. Tests and quality gates (same as CI)
 
@@ -57,6 +57,7 @@ Numbers from a developer laptop are **not** sizing numbers (ADR-004 Evidence). R
 |---|---|
 | `port is already allocated` | Another project uses the port. Change `ARADA_API_PORT` / `ARADA_PG_PORT` in `.env`. |
 | Tests fail with "database tests need PostgreSQL" | Run `./scripts/init-env.sh && docker compose up -d --wait postgres`. |
-| `403 mfa-required-for-scope` as super admin | Enrol and confirm TOTP in this session, or log in with a TOTP code. |
+| `403 mfa-required-for-scope` (super admin, tenant owner, admin or finance) | Enrol and confirm TOTP, then use the token that `/confirm` returns, or log in with a TOTP code. |
+| `401` right after confirming TOTP | Expected: the pre-MFA token was revoked by rotation. Use the new `access_token`. |
 | `404` on another tenant's URL | Expected: non-members cannot see tenants (`02_TENANCY.md` §4). |
 | Migrations fail with a role error | Roles are created by `arada db bootstrap-roles` (the `db-bootstrap` service). Run it before `arada db upgrade`. |

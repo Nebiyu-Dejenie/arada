@@ -40,14 +40,17 @@ This is the project's decision memory (Permanent Command §48). Each ADR lives i
 | [022](adr/ADR-022-uuidv7-identifiers.md) | UUIDv7 + per-tenant human references | Proposed |
 | [023](adr/ADR-023-observability-cardinality.md) | Tenant id in logs and traces, not metric labels | Proposed |
 | [024](adr/ADR-024-provider-agnostic-identity.md) | Provider-agnostic identity; customers per tenant | **Accepted** |
-| [025](adr/ADR-025-scoped-rbac.md) | Scoped RBAC, step-up, maker–checker | Proposed (implemented, partly Planned) |
+| [025](adr/ADR-025-scoped-rbac.md) | Scoped RBAC, step-up, maker–checker | Proposed (implemented, partly Planned; last-super-admin claim corrected 2026-10-01) |
 | [026](adr/ADR-026-root-domain-tbd.md) | `ROOT_DOMAIN` is configuration and TBD | **Accepted** |
 | [027](adr/ADR-027-phase-order.md) | Phase order per Permanent Command §55 | **Accepted** |
 | [028](adr/ADR-028-reference-vertical-phones.md) | Reference vertical: Phones | Assumed |
 | [029](adr/ADR-029-staff-authentication.md) | Staff authentication: opaque sessions, argon2id, TOTP | Proposed (implemented) |
-| [030](adr/ADR-030-hot-path-data-access.md) | Data access on per-request hot paths | **Proposed — awaiting owner review** |
+| [030](adr/ADR-030-hot-path-data-access.md) | Data access on per-request hot paths | **Deferred** (owner, 2026-10-01; not implemented; revisit conditions in the ADR) |
 | [031](adr/ADR-031-feature-flag-precedence.md) | Feature flag precedence | Proposed (implemented) |
 | [032](adr/ADR-032-security-test-inventory.md) | Security tests enumerate OpenAPI and must be non-vacuous | **Accepted** |
+| [033](adr/ADR-033-super-admin-invariant-in-database.md) | The last SUPER_ADMIN is guarded by the database | Proposed (implemented 2026-10-01) |
+| [034](adr/ADR-034-rls-for-all-tenant-tables.md) | Every table with a `tenant_id` is under forced RLS | **Accepted** (owner-directed, 2026-10-01) |
+| [035](adr/ADR-035-tenant-mfa-and-session-rotation.md) | MFA for privileged tenant roles; session rotation on MFA | Proposed (implemented 2026-10-01; implements `09` §3) |
 
 ## 2. Question register (Permanent Command §53)
 
@@ -93,5 +96,6 @@ This is the project's decision memory (Permanent Command §48). Each ADR lives i
 | # | Item | Why |
 |---|---|---|
 | B1 | ~~Owner go-ahead to start Phase 1~~ | **Resolved 2026-09-26**: approved; Phase 1 implemented and awaiting review |
-| B2 | **Owner review of Phase 1** before Phase 2 starts | The owner asked to stop after Phase 1 for review |
-| B3 | Decision on ADR-030 (hot-path data access) | Proposed from Phase 1 performance evidence; affects Phase 2's first task |
+| B2 | **Owner review of Phase 1** before Phase 2 starts | 2026-10-01: the source-level audit was accepted as "Phase 1 approved with fixes", and the corrective pass is implemented. **Phase 2 stays BLOCKED until the owner explicitly approves it after reviewing the corrective pass.** |
+| B3 | ~~Decision on ADR-030 (hot-path data access)~~ | **Resolved 2026-10-01: Deferred** by the owner. It is not part of Phase 2; revisit conditions are in the ADR |
+| B4 | **AUTHENTICATION RATE LIMITING = REQUIRED BEFORE PUBLIC EXPOSURE** | Blocking at the first environment reachable from outside the developer machine (staging or production). Only per-account lockout exists. Each login attempt costs one argon2id verification (64 MiB), including unknown usernames, so unthrottled logins are a resource-exhaustion vector. Needs per-IP and global limits (edge plus application) and a test proving them. |

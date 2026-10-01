@@ -18,6 +18,10 @@ Telegram `initData` validation with HMAC **and** the Ed25519 signature, bot bind
 
 ## 3. Staff authentication (directive §53–54)
 
+> **As built (Phase 1 + corrective pass, 2026-10-01):** password (argon2id) + TOTP; opaque bearer tokens (no cookies yet, so no CSRF surface); platform and vertical roles, **and TENANT_OWNER / TENANT_ADMIN / TENANT_FINANCE**, are usable only in an MFA-verified session (ADR-035); manager and staff roles work without MFA. Confirming TOTP **rotates** the session: the pre-MFA token is revoked and a new one issued, capped at the old absolute expiry (ADR-035). One session policy for everyone for now: idle 30 min, absolute 12 h. Passkeys, per-action step-up, TOTP reset/recovery, device management and the per-tenant staff-MFA policy are **Planned**.
+>
+> **AUTHENTICATION RATE LIMITING = REQUIRED BEFORE PUBLIC EXPOSURE** (register B4). Only per-account lockout exists (10 failures → 15 min). There are no per-IP, per-ASN or global limits. Every login attempt costs one argon2id verification (64 MiB), including attempts for unknown usernames, which is a resource-exhaustion vector. The Redis counters below and the Cloudflare challenge are the target design, not the current state.
+
 | Control | Merchant staff | Merchant owner / admin / finance | Platform roles (incl. Super Admin) |
 |---|---|---|---|
 | Primary factor | Passkey (WebAuthn) or password (argon2id) | Passkey or password | **Passkey required**; password + TOTP only as a recovery path |
@@ -120,10 +124,34 @@ Webhook paths accept `POST` only (WAF rule and app check). Bodies are limited to
 | Secrets | gitleaks | Blocking |
 | Python dependencies | pip-audit (lockfile) | Blocking on high or critical severity with a fix available |
 | JS dependencies | `pnpm audit` / osv-scanner | Same |
-| SAST | Semgrep (Python, TS, Dockerfile rulesets) + Bandit | Blocking on high severity |
-| Containers | Trivy (image + filesystem) | Blocking on critical severity |
+| SAST | Semgrep (Python, TS, Dockerfile rulesets) + Bandit | Blocking on high severity. **Not in CI yet**: today only ruff's `S` (flake8-bandit) rules run, as part of lint |
+| Containers | Trivy (image + filesystem) | Blocking on critical severity. **As built:** CI scans the image only, gating `CRITICAL` with a fix available (`--severity CRITICAL --ignore-unfixed`); HIGH findings do not fail CI |
 | IaC | Trivy config / Checkov on compose, Terraform, Ansible | Blocking on high severity |
 | SBOM | Syft → attached to the release | — |
 | Image provenance | Build on GitHub-hosted runners, push to GHCR with digest pinning; deploy by **digest**, never by `latest` | Required |
 | Actions | Pinned by commit SHA; `permissions:` minimal per job; OIDC instead of long-lived tokens where possible | Required |
 | Dependency updates | Renovate, grouped weekly, auto-merged for patch versions only when tests pass | — |
+
+## 12. Audit trail: what is and is not guaranteed
+
+Precise wording: **the audit trail is append-only for the application, and tamper-resistant; it is not tamper-proof and not tamper-evident.**
+
+- **Guaranteed against the runtime role (`arada_app`):**
+  - it holds only INSERT and SELECT on `control.audit_events`;
+  - row triggers reject UPDATE and DELETE, and a statement trigger rejects TRUNCATE;
+  - forced RLS confines reads and inserts to the transaction's tenant context;
+  - no API route writes or edits audit records.
+
+  Tests: `tests/integration/test_audit_db.py`.
+- **Guaranteed against plain DML by the schema owner and the superuser.** Their ordinary UPDATE, DELETE and TRUNCATE are refused.
+- **Not guaranteed against holders of the schema-owner or superuser credentials.**
+  - The owner can `ALTER TABLE … DISABLE TRIGGER USER` and `NO FORCE ROW LEVEL SECURITY`, then rewrite rows.
+  - A superuser can `SET session_replication_role = replica`, which skips triggers.
+
+  This is demonstrated, not assumed, by `tests/integration/test_audit_db.py::test_known_limitation_schema_owner_can_disable_audit_guards`.
+- **What mitigates it today:**
+  - the owner credentials exist only in the one-shot `migrate` container, and the API container has no owner DSN;
+  - the superuser password exists only in the bootstrap step.
+- **Planned before real data:**
+  - a hash chain or periodic signed checkpoints (tamper evidence);
+  - shipping audit records off the database host.
