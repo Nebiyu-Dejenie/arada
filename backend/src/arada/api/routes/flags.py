@@ -9,7 +9,7 @@ from fastapi import APIRouter, Request, Response
 from pydantic import Field
 
 from arada.api.auth import CurrentPrincipal
-from arada.api.deps import platform, tenant
+from arada.api.deps import container_of, platform, tenant
 from arada.api.schemas import RequestModel, ResponseModel
 from arada.flags import service as flags
 
@@ -47,7 +47,7 @@ class FlagValueOut(ResponseModel):
 @router.get("/platform/feature-flags", response_model=list[FlagOut], tags=["platform"])
 async def list_flags(principal: CurrentPrincipal, request: Request) -> list[FlagOut]:
     async with platform(request, principal) as scope:
-        items = await flags.list_flags(scope)
+        items = await flags.list_flags(scope, container_of(request).db)
     return [
         FlagOut(
             key=f.key,

@@ -300,3 +300,8 @@ ROLES: dict[str, RoleDef] = {
 TENANT_ROLES = frozenset(k for k, r in ROLES.items() if r.scope == "tenant")
 PLATFORM_ROLES = frozenset(k for k, r in ROLES.items() if r.scope == "platform")
 VERTICAL_ROLES = frozenset(k for k, r in ROLES.items() if r.scope == "vertical")
+
+# Tenant roles that hold money, staff-management or security permissions are
+# usable only in an MFA-verified session (09_SECURITY.md §3, ADR-035). Every
+# other tenant role (manager, staff) works with a password-only session.
+MFA_REQUIRED_TENANT_ROLES = frozenset({"TENANT_OWNER", "TENANT_ADMIN", "TENANT_FINANCE"})

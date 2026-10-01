@@ -35,9 +35,14 @@ async def test_app_role_cannot_update_or_delete_audit(app_conn: asyncpg.Connecti
         await app_conn.execute("TRUNCATE control.audit_events")
 
 
-async def test_owner_and_superuser_cannot_tamper_with_audit(
+async def test_owner_and_superuser_plain_dml_cannot_modify_audit(
     app_conn: asyncpg.Connection, owner_conn: asyncpg.Connection, pg_env: PgEnv, test_database: str
 ) -> None:
+    """Ordinary UPDATE/DELETE/TRUNCATE fail even for privileged database roles.
+
+    (Renamed from ``..._cannot_tamper_with_audit``: DDL and replication-role
+    bypasses exist; see the known-limitation test below and 09_SECURITY.md §12.)
+    """
     await app_conn.execute(INSERT, uuid7(), None)
 
     # Forced RLS has no policy for the owner: it cannot even insert or see rows,
@@ -61,6 +66,49 @@ async def test_owner_and_superuser_cannot_tamper_with_audit(
                 await superuser.execute(statement)
     finally:
         await superuser.close()
+
+
+async def test_known_limitation_schema_owner_can_disable_audit_guards(
+    app_conn: asyncpg.Connection, owner_conn: asyncpg.Connection, pg_env: PgEnv, test_database: str
+) -> None:
+    """Documents, with evidence, why the trail is tamper-resistant, not tamper-proof.
+
+    Holders of the owner or superuser credentials can switch the guards off.
+    Everything here runs in rolled-back transactions. If this test starts
+    failing because the bypass was closed, update 09_SECURITY.md §12.
+    """
+    await app_conn.execute(INSERT, uuid7(), None)
+
+    owner_tx = owner_conn.transaction()
+    await owner_tx.start()
+    try:
+        await owner_conn.execute("ALTER TABLE control.audit_events DISABLE TRIGGER USER")
+        await owner_conn.execute("ALTER TABLE control.audit_events NO FORCE ROW LEVEL SECURITY")
+        rewritten = await owner_conn.execute("UPDATE control.audit_events SET reason = 'rewritten'")
+        assert rewritten != "UPDATE 0"
+    finally:
+        await owner_tx.rollback()
+
+    superuser = await asyncpg.connect(pg_env.superuser_dsn(test_database))
+    superuser_tx = superuser.transaction()
+    await superuser_tx.start()
+    try:
+        await superuser.execute("SET LOCAL session_replication_role = replica")
+        rewritten = await superuser.execute(
+            "UPDATE control.audit_events SET reason = reason WHERE action = 'test.event'"
+        )
+        assert rewritten != "UPDATE 0", "replica mode skips the append-only triggers"
+    finally:
+        await superuser_tx.rollback()
+        await superuser.close()
+
+    # The application role can do neither.
+    for statement in (
+        "ALTER TABLE control.audit_events DISABLE TRIGGER USER",
+        "SET session_replication_role = replica",
+    ):
+        with pytest.raises(asyncpg.InsufficientPrivilegeError):
+            await app_conn.execute(statement)
 
 
 async def test_tenant_context_limits_audit_reads_and_writes(

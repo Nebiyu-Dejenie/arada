@@ -36,8 +36,9 @@ class Grants:
     platform: frozenset[str] = frozenset()
     vertical: Mapping[UUID, frozenset[str]] = field(default_factory=lambda: MappingProxyType({}))
     tenant: frozenset[str] = frozenset()
-    # Permissions the principal holds through privileged (platform/vertical)
-    # roles but which are withheld because the session is not MFA-verified.
+    # Permissions the principal holds through privileged roles (platform,
+    # vertical, or MFA-required tenant roles) but which are withheld because
+    # the session is not MFA-verified.
     withheld_for_mfa: frozenset[str] = frozenset()
 
     def privileged(self, permission: str, vertical_id: UUID | None) -> bool:

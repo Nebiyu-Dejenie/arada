@@ -49,10 +49,14 @@ async def issue(
     *,
     person_id: UUID,
     mfa_verified: bool,
+    not_after: datetime | None = None,
 ) -> IssuedSession:
+    """Create a session. ``not_after`` caps its absolute expiry (rotation)."""
     token = secrets.token_urlsafe(TOKEN_BYTES)
     now = now_utc()
     expires_at = now + timedelta(hours=settings.session_absolute_timeout_hours)
+    if not_after is not None:
+        expires_at = min(expires_at, not_after)
     idle = min(now + timedelta(minutes=settings.session_idle_timeout_minutes), expires_at)
     session_id = uuid7()
     await conn.execute(
@@ -118,9 +122,40 @@ async def authenticate(conn: AsyncConnection, settings: Settings, token: str) ->
     )
 
 
-async def mark_mfa_verified(conn: AsyncConnection, session_id: UUID) -> None:
-    await conn.execute(
-        update(sessions).where(sessions.c.id == session_id).values(mfa_verified_at=now_utc())
+async def rotate(
+    conn: AsyncConnection,
+    settings: Settings,
+    meta: RequestMeta,
+    principal: Principal,
+    *,
+    mfa_verified: bool,
+    reason: str,
+) -> IssuedSession:
+    """Replace the caller's session with a new token on a privilege change.
+
+    A token is never upgraded in place: the old session is revoked and a new
+    one issued in the same transaction, so a token observed before the change
+    (logs, a shared device, a fixation attempt) never gains the new
+    privileges. The new session keeps the old one's absolute expiry, so
+    rotation never extends a session's lifetime.
+    """
+    not_after: datetime | None = (
+        await conn.execute(
+            update(sessions)
+            .where(and_(sessions.c.id == principal.session_id, sessions.c.revoked_at.is_(None)))
+            .values(revoked_at=now_utc(), revoked_reason=reason)
+            .returning(sessions.c.expires_at)
+        )
+    ).scalar_one_or_none()
+    if not_after is None:  # revoked concurrently (for example a logout)
+        raise Unauthenticated()
+    return await issue(
+        conn,
+        settings,
+        meta,
+        person_id=principal.person_id,
+        mfa_verified=mfa_verified,
+        not_after=not_after,
     )
 
 

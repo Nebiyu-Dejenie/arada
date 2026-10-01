@@ -8,6 +8,7 @@ import pytest
 from arada.kernel.config import Settings
 from arada.kernel.db import Database
 from arada.kernel.errors import Conflict
+from arada.rbac import service as rbac
 from arada.rbac.bootstrap import bootstrap_super_admin
 from tests.support import (
     DEFAULT_PASSWORD,
@@ -18,6 +19,7 @@ from tests.support import (
     make_person,
     unique,
 )
+from tests.world import World
 
 
 async def _grant(
@@ -116,9 +118,13 @@ async def test_vertical_admin_sees_only_their_vertical(
     assert me["roles"] == {"platform": [], "vertical": [f"VERTICAL_ADMIN@{phones}"]}
 
 
-async def test_revocation_is_immediate_and_last_super_admin_protected(
+async def test_platform_admin_revocation_is_immediate(
     client: httpx.AsyncClient, super_admin: Persona, db: Database
 ) -> None:
+    """(Renamed: this test never covered SUPER_ADMIN. That is now
+    ``test_super_admin_revocation_is_immediate_and_audited`` below, plus the
+    last-SUPER_ADMIN and concurrency tests in
+    ``tests/integration/test_super_admin_invariant.py``.)"""
     dave = await make_person(db)
     assert (await _grant(client, super_admin, dave, "PLATFORM_ADMIN")).status_code == 204
     await login(client, dave)
@@ -133,6 +139,78 @@ async def test_revocation_is_immediate_and_last_super_admin_protected(
     # Same session, very next request: the role is gone.
     assert (await _create_vertical(client, dave, unique("v_"))).status_code == 403
     assert await audit_rows(db, action="rbac.role_revoked", resource_id=str(dave.person_id))
+
+
+async def _revoke(
+    client: httpx.AsyncClient, actor: Persona, target: Persona, role: str = "SUPER_ADMIN"
+) -> httpx.Response:
+    return await client.post(
+        "/v1/platform/role-grants:revoke",
+        headers=actor.headers,
+        json={"person_id": str(target.person_id), "role": role},
+    )
+
+
+async def _platform_roles(db: Database, person: Persona) -> list[str]:
+    async with db.transaction() as conn:
+        return (await rbac.privileged_roles_of(conn, person.person_id))["platform"]
+
+
+async def test_super_admin_revocation_is_immediate_and_audited(
+    client: httpx.AsyncClient, super_admin: Persona, db: Database
+) -> None:
+    ivan = await make_person(db)
+    assert (await _grant(client, super_admin, ivan, "SUPER_ADMIN")).status_code == 204
+    await login(client, ivan)
+    await enrol_totp(client, ivan)
+    assert (await _create_vertical(client, ivan, unique("v_"))).status_code == 201
+
+    revoked = await _revoke(client, super_admin, ivan)
+    assert revoked.status_code == 204, revoked.text
+    # Same session, very next request: the role and its permissions are gone.
+    assert (await _create_vertical(client, ivan, unique("v_"))).status_code == 403
+    assert (await _grant(client, ivan, ivan, "SUPER_ADMIN")).status_code == 403
+    me = (await client.get("/v1/me", headers=ivan.headers)).json()
+    assert me["roles"]["platform"] == []
+    # Revoking again: nothing left to revoke.
+    assert (await _revoke(client, super_admin, ivan)).status_code == 404
+
+    (event,) = await audit_rows(db, action="rbac.role_revoked", resource_id=str(ivan.person_id))
+    assert event.actor_person_id == super_admin.person_id
+    assert event.before == {"role": "SUPER_ADMIN"}
+    assert event.request_id == revoked.headers["x-request-id"]
+
+
+async def test_only_mfa_verified_role_managers_can_revoke_a_super_admin(
+    client: httpx.AsyncClient, super_admin: Persona, db: Database, world: World
+) -> None:
+    target = await make_person(db)
+    assert (await _grant(client, super_admin, target, "SUPER_ADMIN")).status_code == 204
+
+    platform_admin = await make_person(db)
+    assert (await _grant(client, super_admin, platform_admin, "PLATFORM_ADMIN")).status_code == 204
+    await login(client, platform_admin)
+    await enrol_totp(client, platform_admin)
+    unverified_super = await make_person(db)
+    assert (await _grant(client, super_admin, unverified_super, "SUPER_ADMIN")).status_code == 204
+    await login(client, unverified_super)  # password only
+    nobody = await make_person(db)
+    await login(client, nobody)
+
+    assert (await _revoke(client, platform_admin, target)).status_code == 403
+    assert (await _revoke(client, world.a.owner, target)).status_code == 403
+    assert (await _revoke(client, nobody, target)).status_code == 403
+    step_up = await _revoke(client, unverified_super, target)
+    assert step_up.status_code == 403
+    assert step_up.json()["type"] == "urn:arada:problem:mfa-required-for-scope"
+    anonymous = await client.post(
+        "/v1/platform/role-grants:revoke",
+        json={"person_id": str(target.person_id), "role": "SUPER_ADMIN"},
+    )
+    assert anonymous.status_code == 401
+
+    assert await _platform_roles(db, target) == ["SUPER_ADMIN"]
+    assert not await audit_rows(db, action="rbac.role_revoked", resource_id=str(target.person_id))
 
 
 async def test_role_grants_are_validated(

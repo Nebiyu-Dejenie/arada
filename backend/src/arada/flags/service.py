@@ -14,7 +14,8 @@ from arada.audit import service as audit
 from arada.blueprints.tables import blueprint_versions
 from arada.flags.evaluation import FlagValue, Override, evaluate
 from arada.flags.tables import feature_flag_overrides, feature_flags
-from arada.kernel.errors import NotFound, ValidationFailed
+from arada.kernel.db import Database
+from arada.kernel.errors import Forbidden, NotFound, ValidationFailed
 from arada.kernel.ids import uuid7
 from arada.kernel.scope import Scope
 from arada.tenancy import service as tenancy
@@ -40,12 +41,20 @@ async def _flag(conn: AsyncConnection, key: str) -> Any:
     return row
 
 
-async def list_flags(scope: Scope) -> list[FlagInfo]:
-    scope.require("flags.manage")
-    flags = (await scope.conn.execute(select(feature_flags).order_by(feature_flags.c.key))).all()
-    overrides = (
-        await scope.conn.execute(select(feature_flag_overrides).order_by(OV.flag_key))
-    ).all()
+async def list_flags(scope: Scope, db: Database) -> list[FlagInfo]:
+    """Every flag with every override, across all tenants.
+
+    Tenant overrides are RLS-protected (migration 0009), so this platform-wide
+    view is read through the RLS-bypassing reader role, after authorisation.
+    """
+    if "flags.manage" not in scope.grants.platform:
+        scope.require("flags.manage")  # raises the right error (403 / MFA step-up)
+        raise Forbidden("flag management requires a platform-scoped role")
+    async with db.platform_read() as conn:
+        flags = (await conn.execute(select(feature_flags).order_by(feature_flags.c.key))).all()
+        overrides = (
+            await conn.execute(select(feature_flag_overrides).order_by(OV.flag_key, OV.id))
+        ).all()
     by_flag: dict[str, list[dict[str, Any]]] = {}
     for o in overrides:
         by_flag.setdefault(o.flag_key, []).append(

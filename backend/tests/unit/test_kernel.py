@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import ast
 import base64
 import json
 import secrets
 import time
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -100,6 +102,13 @@ def test_production_rejects_unsafe_configuration() -> None:
         )
     message = str(exc.value)
     assert "require_mfa_for_privileged_scopes" in message
+    with pytest.raises(ValidationError, match="require_mfa_for_privileged_tenant_roles"):
+        make_settings(
+            environment=Environment.PRODUCTION,
+            root_domain="example.invalid",
+            expose_api_docs=False,
+            require_mfa_for_privileged_tenant_roles=False,
+        )
     assert "root_domain must be set" in message
 
 
@@ -154,3 +163,29 @@ def test_redaction_removes_secret_keys_and_token_shaped_values() -> None:
         assert secret not in dumped
     assert out["password"] == REDACTED
     assert out["safe"] == "value"
+
+
+# The RLS-bypassing reader may only serve reads that were authorised first as
+# platform-wide (ADR-002, ADR-034). A new call site must be reviewed and added.
+PLATFORM_READER_ALLOW_LIST = {
+    "arada/audit/service.py:list_platform",
+    "arada/flags/service.py:list_flags",
+}
+
+
+def test_platform_reader_is_used_only_by_allow_listed_functions() -> None:
+    src = Path(__file__).resolve().parents[2] / "src"
+    found: set[str] = set()
+    for path in sorted(src.rglob("*.py")):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for fn in ast.walk(tree):
+            if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            for node in ast.walk(fn):
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "platform_read"
+                ):
+                    found.add(f"{path.relative_to(src).as_posix()}:{fn.name}")
+    assert found == PLATFORM_READER_ALLOW_LIST

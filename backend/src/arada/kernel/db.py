@@ -19,6 +19,7 @@ from contextlib import asynccontextmanager
 from uuid import UUID
 
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
 from arada.kernel.config import Settings
@@ -27,6 +28,17 @@ _SET_CONTEXT = text(
     "SELECT set_config('app.tenant_id', :tenant_id, true), "
     "set_config('app.person_id', :person_id, true)"
 )
+
+
+RESTRICT_VIOLATION = "23001"
+
+
+def sqlstate(exc: DBAPIError) -> str | None:
+    """The PostgreSQL SQLSTATE behind a driver error, if there is one."""
+    orig = getattr(exc, "orig", None)
+    return getattr(orig, "sqlstate", None) or getattr(
+        getattr(orig, "__cause__", None), "sqlstate", None
+    )
 
 
 async def set_context(

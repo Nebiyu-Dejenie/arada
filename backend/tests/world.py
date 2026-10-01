@@ -2,7 +2,9 @@
 
 Super Admin -> vertical -> Phones blueprint (1.0.0, 1.1.0) -> tenants A and B.
 Each tenant's owner joins through the owner invitation (self-registration),
-then invites an Admin and a Staff member who register the same way.
+then invites an Admin and a Staff member who register the same way. Owners
+and admins enrol TOTP, because their roles need an MFA-verified session
+(ADR-035); staff use a password-only session.
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ from typing import Any
 import httpx
 import yaml
 
-from tests.support import DEFAULT_PASSWORD, Persona, login, unique
+from tests.support import DEFAULT_PASSWORD, Persona, enrol_totp, login, unique
 
 SEEDS = Path(__file__).resolve().parents[2] / "blueprints" / "phones"
 
@@ -50,7 +52,7 @@ async def _ok(response: httpx.Response, status: int = 200) -> Any:
     return response.json() if response.content else None
 
 
-async def accept_as_new(client: httpx.AsyncClient, token: str) -> Persona:
+async def accept_as_new(client: httpx.AsyncClient, token: str, *, mfa: bool = False) -> Persona:
     username = unique("u")
     body = {
         "token": token,
@@ -65,6 +67,8 @@ async def accept_as_new(client: httpx.AsyncClient, token: str) -> Persona:
         person_id=membership["membership_id"], username=username, password=DEFAULT_PASSWORD
     )
     await login(client, persona)
+    if mfa:
+        await enrol_totp(client, persona)
     me = await _ok(await client.get("/v1/me", headers=persona.headers))
     persona.person_id = me["person_id"]
     return persona
@@ -105,8 +109,10 @@ async def build_tenant(
     client: httpx.AsyncClient, root: Persona, vertical: str, version_id: str, prefix: str
 ) -> TenantWorld:
     tenant_id, slug, owner_token = await create_tenant(client, root, vertical, version_id, prefix)
-    owner = await accept_as_new(client, owner_token)
-    admin = await accept_as_new(client, await invite(client, owner, slug, ["TENANT_ADMIN"]))
+    owner = await accept_as_new(client, owner_token, mfa=True)
+    admin = await accept_as_new(
+        client, await invite(client, owner, slug, ["TENANT_ADMIN"]), mfa=True
+    )
     staff = await accept_as_new(client, await invite(client, admin, slug, ["TENANT_STAFF"]))
     await _ok(await client.post(f"/v1/platform/tenants/{tenant_id}:activate", headers=root.headers))
     world = TenantWorld(id=tenant_id, slug=slug, owner=owner, admin=admin, staff=staff)

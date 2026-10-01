@@ -298,9 +298,19 @@ async def begin_totp_enrolment(
 
 
 async def confirm_totp(
-    db: Database, keyring: Keyring, meta: RequestMeta, principal: Principal, code: str
-) -> None:
-    ok = False
+    db: Database,
+    settings: Settings,
+    keyring: Keyring,
+    meta: RequestMeta,
+    principal: Principal,
+    code: str,
+) -> sessions.IssuedSession:
+    """Confirm the pending factor and return a new, MFA-verified session.
+
+    The session that proved possession of the factor is revoked and replaced
+    (``sessions.rotate``): its token never becomes MFA-verified.
+    """
+    rotated: sessions.IssuedSession | None = None
     async with db.transaction(person_id=principal.person_id) as conn:
         if await totp.status(conn, principal.person_id) != "pending":
             raise Conflict("no pending TOTP enrolment")
@@ -309,8 +319,9 @@ async def confirm_totp(
         )
         if ok:
             await totp.confirm(conn, principal.person_id)
-            # The session that proved possession of the factor is now verified.
-            await sessions.mark_mfa_verified(conn, principal.session_id)
+            rotated = await sessions.rotate(
+                conn, settings, meta, principal, mfa_verified=True, reason="rotated: mfa verified"
+            )
             await audit.record(
                 conn,
                 meta,
@@ -319,9 +330,12 @@ async def confirm_totp(
                 action="mfa.totp_confirmed",
                 resource_type="person",
                 resource_id=principal.person_id,
+                before={"session_id": principal.session_id},
+                after={"session_id": rotated.session_id, "mfa_verified": True},
             )
-    if not ok:
+    if rotated is None:
         raise ValidationFailed(errors={"code": ["invalid or expired code"]})
+    return rotated
 
 
 async def find_by_username(scope: Scope, username: str) -> PersonSummary:

@@ -40,7 +40,9 @@ async def tenant_scope(
     The tenant comes from the slug via the tenants table; the transaction's
     RLS context is set to it before any tenant data is read. A person with no
     membership and no privileged grant for the tenant's vertical gets 404,
-    exactly as if the tenant did not exist.
+    exactly as if the tenant did not exist. A member whose roles all require
+    MFA (owner, admin, finance) gets 403 ``mfa-required-for-scope`` until the
+    session is MFA-verified.
     """
     async with db.transaction(person_id=principal.person_id) as conn:
         tenant = await tenancy.resolve_by_slug(conn, slug)
@@ -50,12 +52,14 @@ async def tenant_scope(
         privileged = await rbac.load_privileged_grants(
             conn, principal.person_id, mfa_ok=rbac.mfa_satisfied(settings, principal)
         )
-        tenant_perms = await rbac.load_tenant_grants(conn, principal.person_id)
+        tenant_perms, tenant_withheld = await rbac.load_tenant_grants(
+            conn, principal.person_id, mfa_ok=rbac.tenant_mfa_satisfied(settings, principal)
+        )
         grants = Grants(
             platform=privileged.platform,
             vertical=privileged.vertical,
             tenant=tenant_perms,
-            withheld_for_mfa=privileged.withheld_for_mfa,
+            withheld_for_mfa=privileged.withheld_for_mfa | tenant_withheld,
         )
         if not tenant_perms and not grants.privileged("tenants.read", tenant.vertical_id):
             if "tenants.read" in grants.withheld_for_mfa:

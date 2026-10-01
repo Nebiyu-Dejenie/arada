@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import hashlib
+from typing import Any
 
 import asyncpg
 import httpx
 import pytest
 
+from arada.identity import sessions
 from arada.identity.service import create_person_with_password
+from arada.kernel.config import Settings
+from arada.kernel.context import Principal
 from arada.kernel.db import Database
-from arada.kernel.errors import Conflict
+from arada.kernel.errors import Conflict, Unauthenticated
 from tests.conftest import PgEnv
 from tests.support import (
     DEFAULT_PASSWORD,
@@ -194,3 +198,109 @@ async def test_login_audit_is_correlated(client: httpx.AsyncClient, db: Database
     assert rows[0].trace_id == response.headers["traceparent"].split("-")[1]
     assert rows[0].source == "api"
     assert rows[0].tenant_id is None
+
+
+async def _session_rows(pg_env: PgEnv, test_database: str, person_id: object) -> list[Any]:
+    conn = await asyncpg.connect(pg_env.superuser_dsn(test_database))
+    try:
+        return list(
+            await conn.fetch(
+                "SELECT id, token_hash, created_at, idle_expires_at, expires_at, "
+                "mfa_verified_at, revoked_at, revoked_reason "
+                "FROM control.sessions WHERE person_id = $1 ORDER BY created_at",
+                person_id,
+            )
+        )
+    finally:
+        await conn.close()
+
+
+async def test_mfa_confirmation_rotates_the_session(
+    client: httpx.AsyncClient, db: Database, pg_env: PgEnv, test_database: str
+) -> None:
+    ivy = await make_person(db)
+    before = await login(client, ivy)
+    await enrol_totp(client, ivy)  # switches ivy to the rotated token
+    after = ivy.token
+    assert after is not None
+    assert after != before
+
+    # The pre-MFA token is dead; the new one carries the MFA state.
+    assert (
+        await client.get("/v1/me", headers={"Authorization": f"Bearer {before}"})
+    ).status_code == 401
+    me = (await client.get("/v1/me", headers=ivy.headers)).json()
+    assert me["mfa"] == {"totp": "confirmed", "session_verified": True}
+
+    old, new = await _session_rows(pg_env, test_database, ivy.person_id)
+    assert old["token_hash"] == hashlib.sha256(before.encode()).digest()
+    assert new["token_hash"] == hashlib.sha256(after.encode()).digest()
+    assert old["revoked_at"] is not None
+    assert old["revoked_reason"] == "rotated: mfa verified"
+    assert old["mfa_verified_at"] is None, "the old session was never upgraded in place"
+    assert new["revoked_at"] is None
+    assert new["mfa_verified_at"] is not None
+    # Rotation never extends the session's absolute lifetime.
+    assert new["expires_at"] == old["expires_at"]
+    assert new["idle_expires_at"] <= new["expires_at"]
+
+    (event,) = await audit_rows(db, action="mfa.totp_confirmed", actor_person_id=ivy.person_id)
+    assert event.before == {"session_id": str(old["id"])}
+    assert event.after == {"session_id": str(new["id"]), "mfa_verified": True}
+
+
+async def test_rotation_keeps_a_nearly_expired_session_nearly_expired(
+    client: httpx.AsyncClient, db: Database, pg_env: PgEnv, test_database: str
+) -> None:
+    jade = await make_person(db)
+    await login(client, jade)
+    conn = await asyncpg.connect(pg_env.superuser_dsn(test_database))
+    try:
+        cap = await conn.fetchval(
+            "UPDATE control.sessions SET expires_at = now() + interval '3 minutes', "
+            "idle_expires_at = now() + interval '3 minutes' "
+            "WHERE person_id = $1 RETURNING expires_at",
+            jade.person_id,
+        )
+    finally:
+        await conn.close()
+    await enrol_totp(client, jade)
+    old, new = await _session_rows(pg_env, test_database, jade.person_id)
+    assert new["expires_at"] == old["expires_at"] == cap
+    assert new["idle_expires_at"] <= cap
+
+
+async def test_failed_confirmation_does_not_rotate_or_verify(
+    client: httpx.AsyncClient, db: Database
+) -> None:
+    kim = await make_person(db)
+    await login(client, kim)
+    started = await client.post("/v1/me/mfa/totp", headers=kim.headers)
+    assert started.status_code == 200
+    wrong = await client.post(
+        "/v1/me/mfa/totp/confirm", headers=kim.headers, json={"code": "000000"}
+    )
+    assert wrong.status_code == 422
+    assert "access_token" not in wrong.text
+    me = await client.get("/v1/me", headers=kim.headers)
+    assert me.status_code == 200, "the session survives a failed attempt"
+    assert me.json()["mfa"] == {"totp": "pending", "session_verified": False}
+
+
+async def test_rotation_refuses_a_session_revoked_meanwhile(
+    db: Database, settings: Settings
+) -> None:
+    """A logout that lands between authentication and rotation wins."""
+    lee = await make_person(db)
+    async with db.transaction() as conn:
+        issued = await sessions.issue(
+            conn, settings, SYSTEM_META, person_id=lee.person_id, mfa_verified=False
+        )
+    principal = Principal(person_id=lee.person_id, session_id=issued.session_id)
+    async with db.transaction() as conn:
+        await sessions.revoke(conn, issued.session_id, "logout")
+    with pytest.raises(Unauthenticated):
+        async with db.transaction() as conn:
+            await sessions.rotate(
+                conn, settings, SYSTEM_META, principal, mfa_verified=True, reason="test"
+            )

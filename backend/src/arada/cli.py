@@ -72,6 +72,10 @@ def cmd_config_check(_: argparse.Namespace) -> int:
     print(f"environment={settings.environment.value}")
     print(f"root_domain={settings.root_domain or 'TBD'}")
     print(f"require_mfa_for_privileged_scopes={settings.require_mfa_for_privileged_scopes}")
+    print(
+        "require_mfa_for_privileged_tenant_roles="
+        f"{settings.require_mfa_for_privileged_tenant_roles}"
+    )
     print("configuration OK")
     return 0
 

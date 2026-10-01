@@ -14,15 +14,17 @@ from uuid import UUID
 
 from sqlalchemy import and_, delete, func, insert, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from arada.audit import service as audit
 from arada.identity.tables import persons
 from arada.kernel.config import Settings
 from arada.kernel.context import Principal
+from arada.kernel.db import RESTRICT_VIOLATION, sqlstate
 from arada.kernel.errors import Conflict, NotFound, ValidationFailed
 from arada.kernel.scope import Grants, Scope
-from arada.rbac.catalogue import PLATFORM_ROLES, VERTICAL_ROLES
+from arada.rbac.catalogue import MFA_REQUIRED_TENANT_ROLES, PLATFORM_ROLES, VERTICAL_ROLES
 from arada.rbac.tables import (
     platform_role_assignments,
     role_permissions,
@@ -36,6 +38,10 @@ from arada.verticals.tables import verticals
 
 def mfa_satisfied(settings: Settings, principal: Principal) -> bool:
     return principal.mfa_verified or not settings.require_mfa_for_privileged_scopes
+
+
+def tenant_mfa_satisfied(settings: Settings, principal: Principal) -> bool:
+    return principal.mfa_verified or not settings.require_mfa_for_privileged_tenant_roles
 
 
 async def load_privileged_grants(conn: AsyncConnection, person_id: UUID, *, mfa_ok: bool) -> Grants:
@@ -153,22 +159,10 @@ async def revoke_role(
 ) -> None:
     scope.require("roles.manage")
     if role in PLATFORM_ROLES:
-        if role == "SUPER_ADMIN":
-            # Serialise concurrent revocations, then refuse to remove the last one.
-            await scope.conn.execute(
-                select(platform_role_assignments.c.person_id)
-                .where(platform_role_assignments.c.role_key == "SUPER_ADMIN")
-                .with_for_update()
-            )
-            count = (
-                await scope.conn.execute(
-                    select(func.count()).where(
-                        platform_role_assignments.c.role_key == "SUPER_ADMIN"
-                    )
-                )
-            ).scalar_one()
-            if count <= 1:
-                raise Conflict("cannot revoke the last SUPER_ADMIN")
+        # The last SUPER_ADMIN is guarded by the database itself (migration
+        # 0008): a trigger serialises concurrent revocations and refuses the
+        # one that would leave none. The refusal aborts this transaction, so
+        # nothing (deletion or audit) is committed.
         stmt = delete(platform_role_assignments).where(
             and_(
                 platform_role_assignments.c.person_id == person_id,
@@ -190,7 +184,12 @@ async def revoke_role(
         target = {"role": role, "vertical": vertical_key}
     else:
         raise ValidationFailed(errors={"role": ["not a platform or vertical role"]})
-    result = await scope.conn.execute(stmt)
+    try:
+        result = await scope.conn.execute(stmt)
+    except IntegrityError as exc:
+        if role == "SUPER_ADMIN" and sqlstate(exc) == RESTRICT_VIOLATION:
+            raise Conflict("cannot revoke the last SUPER_ADMIN") from exc
+        raise
     if not result.rowcount:
         raise NotFound("role assignment not found")
     await audit.record_in(
@@ -237,35 +236,40 @@ async def assign_super_admin_unchecked(conn: AsyncConnection, person_id: UUID) -
     )
 
 
-async def load_tenant_grants(conn: AsyncConnection, person_id: UUID) -> frozenset[str]:
+async def load_tenant_grants(
+    conn: AsyncConnection, person_id: UUID, *, mfa_ok: bool
+) -> tuple[frozenset[str], frozenset[str]]:
     """Permissions from the person's roles in the *current* tenant.
+
+    Returns ``(usable, withheld_for_mfa)``. Without an MFA-verified session,
+    permissions that only come from ``MFA_REQUIRED_TENANT_ROLES`` are withheld;
+    permissions also held through another role stay usable.
 
     Runs inside a tenant context: RLS restricts the membership tables to that
     tenant, so this can never return another tenant's grants.
     """
-    return frozenset(
-        (
-            await conn.execute(
-                select(role_permissions.c.permission_key)
-                .distinct()
-                .select_from(tenant_membership_roles)
-                .join(
-                    tenant_memberships,
-                    and_(
-                        tenant_memberships.c.tenant_id == tenant_membership_roles.c.tenant_id,
-                        tenant_memberships.c.id == tenant_membership_roles.c.membership_id,
-                    ),
-                )
-                .join(
-                    role_permissions,
-                    role_permissions.c.role_key == tenant_membership_roles.c.role_key,
-                )
-                .where(
-                    and_(
-                        tenant_memberships.c.person_id == person_id,
-                        tenant_memberships.c.status == "active",
-                    )
+    rows = (
+        await conn.execute(
+            select(tenant_membership_roles.c.role_key, role_permissions.c.permission_key)
+            .select_from(tenant_membership_roles)
+            .join(
+                tenant_memberships,
+                and_(
+                    tenant_memberships.c.tenant_id == tenant_membership_roles.c.tenant_id,
+                    tenant_memberships.c.id == tenant_membership_roles.c.membership_id,
+                ),
+            )
+            .join(
+                role_permissions,
+                role_permissions.c.role_key == tenant_membership_roles.c.role_key,
+            )
+            .where(
+                and_(
+                    tenant_memberships.c.person_id == person_id,
+                    tenant_memberships.c.status == "active",
                 )
             )
-        ).scalars()
-    )
+        )
+    ).all()
+    usable = frozenset(p for r, p in rows if mfa_ok or r not in MFA_REQUIRED_TENANT_ROLES)
+    return usable, frozenset(p for _, p in rows) - usable

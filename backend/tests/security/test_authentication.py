@@ -8,7 +8,8 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from tests.support import api_operations
+from arada.kernel.db import Database
+from tests.support import Persona, api_operations, enrol_totp, login, make_person, unique
 from tests.world import World
 
 PUBLIC = {
@@ -77,8 +78,6 @@ async def test_tokens_are_not_accepted_from_query_strings(
 
 
 async def test_revoked_session_cannot_be_reused(client: httpx.AsyncClient, world: World) -> None:
-    from tests.support import login
-
     persona = world.b.staff
     old = persona.token
     await login(client, persona)  # fresh session for the rest of the suite
@@ -89,3 +88,41 @@ async def test_revoked_session_cannot_be_reused(client: httpx.AsyncClient, world
     assert (await client.get("/v1/me", headers=persona.headers)).status_code == 401
     persona.token = fresh
     assert (await client.get("/v1/me", headers=persona.headers)).status_code == 200
+
+
+async def test_pre_mfa_token_never_gains_privileged_access(
+    client: httpx.AsyncClient, super_admin: Persona, db: Database
+) -> None:
+    """Session fixation / upgrade-in-place: the token that existed before MFA
+    was proven must not become a privileged token afterwards."""
+    mo = await make_person(db)
+    granted = await client.post(
+        "/v1/platform/role-grants",
+        headers=super_admin.headers,
+        json={"person_id": str(mo.person_id), "role": "SUPER_ADMIN"},
+    )
+    assert granted.status_code == 204
+    pre_mfa = {"Authorization": f"Bearer {await login(client, mo)}"}
+    body = {"key": unique("v_"), "name_en": "Fixation"}
+    denied = await client.post("/v1/platform/verticals", headers=pre_mfa, json=body)
+    assert denied.status_code == 403
+    assert denied.json()["type"] == "urn:arada:problem:mfa-required-for-scope"
+
+    await enrol_totp(client, mo)
+
+    for method, path, payload in (
+        ("POST", "/v1/platform/verticals", body),
+        ("GET", "/v1/platform/verticals", None),
+        ("GET", "/v1/me", None),
+    ):
+        stale = await client.request(method, path, headers=pre_mfa, json=payload)
+        assert stale.status_code == 401, f"{method} {path} with the pre-MFA token"
+    fresh = await client.post("/v1/platform/verticals", headers=mo.headers, json=body)
+    assert fresh.status_code == 201
+    # Clean up the extra SUPER_ADMIN (others remain, so the guard allows it).
+    revoked = await client.post(
+        "/v1/platform/role-grants:revoke",
+        headers=super_admin.headers,
+        json={"person_id": str(mo.person_id), "role": "SUPER_ADMIN"},
+    )
+    assert revoked.status_code == 204

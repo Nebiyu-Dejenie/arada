@@ -76,14 +76,16 @@ async def login(client: httpx.AsyncClient, persona: Persona, *, with_totp: bool 
 
 
 async def enrol_totp(client: httpx.AsyncClient, persona: Persona) -> None:
-    """Enrol and confirm TOTP; the current session becomes MFA-verified."""
+    """Enrol and confirm TOTP; the persona switches to the rotated, MFA-verified token."""
     started = await client.post("/v1/me/mfa/totp", headers=persona.headers)
     assert started.status_code == 200, started.text
     persona.totp_secret = started.json()["secret"]
     confirmed = await client.post(
         "/v1/me/mfa/totp/confirm", headers=persona.headers, json={"code": persona.next_totp()}
     )
-    assert confirmed.status_code == 204, confirmed.text
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["mfa_verified"] is True
+    persona.token = confirmed.json()["access_token"]
 
 
 async def audit_rows(db: Database, **filters: Any) -> list[Any]:

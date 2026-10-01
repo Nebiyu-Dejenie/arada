@@ -99,6 +99,20 @@ class Actor:
         check(r.status_code == 200, f"login {self.username}: {r.status_code} {r.text}")
         self.token = r.json()["access_token"]
 
+    def enrol_totp(self) -> None:
+        """Enrol TOTP; confirmation rotates the session (the old token dies)."""
+        enrol = expect(self.client.post("/v1/me/mfa/totp", headers=self.h), 200, "totp enrol")
+        self.totp = pyotp.TOTP(enrol["secret"])
+        old = self.h
+        rotated = expect(
+            self.client.post("/v1/me/mfa/totp/confirm", headers=old, json={"code": self.code()}),
+            200,
+            "totp confirm",
+        )
+        check(rotated["mfa_verified"], "rotated session is MFA-verified")
+        self.token = rotated["access_token"]
+        expect(self.client.get("/v1/me", headers=old), 401, "pre-MFA token after rotation")
+
 
 def expect(r: httpx.Response, status: int, what: str) -> Any:
     check(r.status_code == status, f"{what}: expected {status}, got {r.status_code} {r.text[:300]}")
@@ -135,13 +149,7 @@ def main() -> None:
             "/v1/platform/verticals", headers=root.h, json={"key": "probe", "name_en": "P"}
         )
         expect(denied, 403, "platform action before MFA")
-        enrol = expect(client.post("/v1/me/mfa/totp", headers=root.h), 200, "totp enrol")
-        root.totp = pyotp.TOTP(enrol["secret"])
-        expect(
-            client.post("/v1/me/mfa/totp/confirm", headers=root.h, json={"code": root.code()}),
-            204,
-            "totp confirm",
-        )
+        root.enrol_totp()
         me = expect(client.get("/v1/me", headers=root.h), 200, "me")
         check(me["roles"]["platform"] == ["SUPER_ADMIN"], "super admin role")
         check(me["mfa"]["session_verified"], "session MFA-verified")
@@ -235,7 +243,9 @@ def main() -> None:
                 "owner_token": created["owner_invitation"]["token"],
             }
 
-    def join(token: str, role_hint: str) -> Actor:
+    def join(token: str, role_hint: str, *, mfa_for: str | None = None) -> Actor:
+        """Accept an invitation as a new account; ``mfa_for`` (a tenant slug)
+        marks a role that needs MFA: refused there until TOTP is enrolled."""
         uname = f"{role_hint}{secrets.token_hex(3)}"
         pw = secrets.token_urlsafe(18)
         expect(
@@ -251,12 +261,18 @@ def main() -> None:
         )
         actor = Actor(client, uname, pw)
         actor.login()
+        if mfa_for:
+            refused = expect(
+                client.get(f"/v1/t/{mfa_for}", headers=actor.h), 403, f"{role_hint} before MFA"
+            )
+            check(refused["type"].endswith("mfa-required-for-scope"), "MFA step-up required")
+            actor.enrol_totp()
         return actor
 
-    @step("5. owners, admins and staff join via invitations; tenants activated")
+    @step("5. owners and admins (with TOTP) and staff join via invitations; tenants activated")
     def roles() -> None:
         for key, t in world["tenants"].items():
-            owner = join(t["owner_token"], f"owner{key}")
+            owner = join(t["owner_token"], f"owner{key}", mfa_for=t["slug"])
             admin_inv = expect(
                 client.post(
                     f"/v1/t/{t['slug']}/invitations",
@@ -266,7 +282,7 @@ def main() -> None:
                 201,
                 "invite admin",
             )
-            admin = join(admin_inv["token"], f"admin{key}")
+            admin = join(admin_inv["token"], f"admin{key}", mfa_for=t["slug"])
             staff_inv = expect(
                 client.post(
                     f"/v1/t/{t['slug']}/invitations",

@@ -17,6 +17,7 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from arada.kernel.context import RequestMeta
+from arada.kernel.db import sqlstate
 from arada.kernel.errors import AppError
 from arada.kernel.logging import get_logger
 
@@ -48,13 +49,6 @@ def _problem(
     return JSONResponse(body, status_code=status, media_type=_PROBLEM)
 
 
-def _sqlstate(exc: DBAPIError) -> str | None:
-    orig = getattr(exc, "orig", None)
-    return getattr(orig, "sqlstate", None) or getattr(
-        getattr(orig, "__cause__", None), "sqlstate", None
-    )
-
-
 def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def _app_error(request: Request, exc: AppError) -> JSONResponse:
@@ -78,7 +72,7 @@ def install_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(IntegrityError)
     async def _integrity(request: Request, exc: IntegrityError) -> JSONResponse:
-        state = _sqlstate(exc)
+        state = sqlstate(exc)
         log.warning("db.integrity_error", sqlstate=state)
         if state == "23505":
             return _problem(request, 409, "conflict", "Conflict", "resource already exists")
@@ -86,7 +80,7 @@ def install_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(DBAPIError)
     async def _dbapi(request: Request, exc: DBAPIError) -> JSONResponse:
-        state = _sqlstate(exc)
+        state = sqlstate(exc)
         if state and state.startswith("22"):  # data exception: bad input reached the DB
             log.warning("db.data_exception", sqlstate=state)
             return _problem(request, 422, "invalid-input", "Input contains invalid data")

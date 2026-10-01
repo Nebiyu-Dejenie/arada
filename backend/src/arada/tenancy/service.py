@@ -129,21 +129,23 @@ async def resolve_by_slug(conn: AsyncConnection, slug: str) -> TenantRef | None:
 
 
 async def resolve_by_host(conn: AsyncConnection, host: str) -> TenantRef | None:
-    """Host header -> tenant, through the domains table only (never client input)."""
+    """Host header -> tenant, through the domains table only (never client input).
+
+    ``domains`` is RLS-protected and no tenant context exists yet, so the
+    lookup goes through the narrow resolver function (migration 0009).
+    """
     hostname = host.strip().lower().split(":", 1)[0].rstrip(".")
     if not HOSTNAME.match(hostname) or len(hostname) > 253:
         return None
+    tenant_id: UUID | None = (
+        await conn.execute(select(func.control.resolve_storefront_host(hostname)))
+    ).scalar_one_or_none()
+    if tenant_id is None:
+        return None
     row = (
         await conn.execute(
-            select(tenants.c.id, tenants.c.slug, tenants.c.vertical_id, tenants.c.status)
-            .join(domains, domains.c.tenant_id == tenants.c.id)
-            .where(
-                and_(
-                    domains.c.hostname == hostname,
-                    domains.c.status == "active",
-                    domains.c.kind == "storefront",
-                    tenants.c.status.in_(("active",)),
-                )
+            select(tenants.c.id, tenants.c.slug, tenants.c.vertical_id, tenants.c.status).where(
+                and_(tenants.c.id == tenant_id, tenants.c.status == "active")
             )
         )
     ).first()

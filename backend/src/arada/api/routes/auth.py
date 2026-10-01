@@ -65,10 +65,21 @@ async def begin_totp(principal: CurrentPrincipal, request: Request, meta: Meta) 
     return TotpEnrolmentOut(secret=enrolment.secret, provisioning_uri=enrolment.provisioning_uri)
 
 
-@router.post("/me/mfa/totp/confirm", status_code=204, summary="Confirm TOTP enrolment")
+@router.post(
+    "/me/mfa/totp/confirm",
+    response_model=SessionOut,
+    summary="Confirm TOTP enrolment",
+    description=(
+        "Confirms the pending factor and rotates the session: the calling token "
+        "is revoked and a new, MFA-verified token is returned in its place. The "
+        "new session keeps the old one's absolute expiry."
+    ),
+)
 async def confirm_totp(
     body: TotpConfirmIn, principal: CurrentPrincipal, request: Request, meta: Meta
-) -> Response:
+) -> SessionOut:
     c = container_of(request)
-    await identity.confirm_totp(c.db, c.keyring, meta, principal, body.code)
-    return Response(status_code=204)
+    issued = await identity.confirm_totp(c.db, c.settings, c.keyring, meta, principal, body.code)
+    return SessionOut(
+        access_token=issued.token, expires_at=issued.expires_at, mfa_verified=issued.mfa_verified
+    )

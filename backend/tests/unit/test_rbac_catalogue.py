@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from arada.rbac.catalogue import PERMISSIONS, ROLES
+from arada.rbac.catalogue import MFA_REQUIRED_TENANT_ROLES, PERMISSIONS, ROLES
 
 CHARTER_PERMISSIONS = {
     # Permanent Command §10 and the Phase 1 approval message.
@@ -54,3 +54,20 @@ def test_platform_admin_cannot_move_money_or_grant_roles() -> None:
         "roles.manage", "security.manage", "finance.payout", "finance.adjust",
         "payments.refund", "payments.capture",
     }  # fmt: skip
+
+
+# Money, staff management, security and bulk data export (09_SECURITY.md §3).
+MFA_SENSITIVE_TENANT_PERMISSIONS = {
+    "staff.manage", "payments.capture", "payments.refund", "payments.configure",
+    "finance.read", "finance.export", "finance.payout_destination.manage", "orders.refund",
+    "customers.export", "audit.read", "ai.configure",
+}  # fmt: skip
+
+
+def test_sensitive_tenant_permissions_exist_only_in_mfa_required_roles() -> None:
+    assert {"TENANT_OWNER", "TENANT_ADMIN", "TENANT_FINANCE"} == MFA_REQUIRED_TENANT_ROLES
+    assert all(ROLES[r].scope == "tenant" for r in MFA_REQUIRED_TENANT_ROLES)
+    for key, role in ROLES.items():
+        if role.scope == "tenant" and key not in MFA_REQUIRED_TENANT_ROLES:
+            leaked = role.permissions & MFA_SENSITIVE_TENANT_PERMISSIONS
+            assert not leaked, f"{key} (no MFA) holds {sorted(leaked)}"

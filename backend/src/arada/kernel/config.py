@@ -63,6 +63,8 @@ class Settings(BaseSettings):
     login_max_failures: int = Field(default=10, ge=3)
     login_lockout_minutes: int = Field(default=15, ge=1)
     require_mfa_for_privileged_scopes: bool = True
+    # Tenant roles holding money, staff or security permissions (ADR-035).
+    require_mfa_for_privileged_tenant_roles: bool = True
     totp_issuer: str = "ARADA"
 
     # Tenancy
@@ -92,6 +94,8 @@ class Settings(BaseSettings):
             problems: list[str] = []
             if not self.require_mfa_for_privileged_scopes:
                 problems.append("require_mfa_for_privileged_scopes must be true")
+            if not self.require_mfa_for_privileged_tenant_roles:
+                problems.append("require_mfa_for_privileged_tenant_roles must be true")
             if self.log_format != "json":
                 problems.append("log_format must be json")
             if self.expose_api_docs:
