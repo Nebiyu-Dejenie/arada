@@ -18,6 +18,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import asyncpg
 import httpx
 import pytest
 from fastapi import FastAPI
@@ -109,6 +110,34 @@ async def test_every_rejection_is_the_same_generic_401_with_a_logged_reason(
         assert_generic_401(response)
         assert response.json()["type"] == GENERIC["type"], label
     assert reasons(logs) == [reason for _, _, reason in cases]
+
+
+async def test_a_resplit_signed_string_cannot_impersonate_another_user(
+    client: httpx.AsyncClient,
+    storefronts: tuple[Storefront, Storefront],
+    telegram_signer: Signer,
+    owner_conn: asyncpg.Connection,
+    logs: io.StringIO,
+) -> None:
+    """Deep audit finding F1, end to end: a Telegram-signed value containing the
+    line-feed separator must not let its holder log in as someone else."""
+    sf, _ = storefronts
+    victim_id = 900000000 + int(time.time()) % 1000000
+    victim = json.dumps({"id": victim_id, "first_name": "Victim"}, separators=(",", ":"))
+    genuine = telegram_signer.fields(
+        bot_id=sf.bot_id,
+        bot_token=sf.bot_token,
+        user={"id": victim_id + 1, "first_name": "Attacker"},
+        extra={"start_param": "x\nuser=" + victim + "\nuserz="},
+    )
+    forged = {k: v for k, v in genuine.items() if k not in ("start_param", "user")}
+    forged.update(start_param="x", user=victim, userz="\nuser=" + genuine["user"])
+    assert_generic_401(await telegram_login(client, sf.host, encode(forged)))
+    assert reasons(logs) == ["malformed"]
+    assert not await owner_conn.fetchval(
+        "SELECT count(*) FROM control.identities WHERE provider = 'telegram' AND subject = $1",
+        str(victim_id),
+    )
 
 
 async def test_replayed_init_data_is_refused_after_the_use_cap(

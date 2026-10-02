@@ -99,11 +99,14 @@ def diagnose_parse(raw: str) -> list[str]:
             findings.append(f"field '{key}': invalid percent escape")
             continue
         try:
-            miniapp._decode_component(value_part)
+            value = miniapp._decode_component(value_part)
         except miniapp.InitDataRejected:
             findings.append(f"field '{key}': not UTF-8 after percent-decoding")
         except UnicodeEncodeError:
             pass  # a non-ASCII raw character, already reported above
+        else:
+            if "\n" in value:
+                findings.append(f"field '{key}': contains a line feed (the separator)")
     return findings or ["no specific rule identified"]
 
 

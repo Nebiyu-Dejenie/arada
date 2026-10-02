@@ -115,6 +115,7 @@ def test_stdin_mode_takes_a_long_sample_whole_and_reports_its_length(
         ("auth_date=1&auth_date=2", "duplicate field 'auth_date'"),
         ("auth_date", "pair without '='"),
         ("a-b=1", "field name outside [A-Za-z0-9_]{1,64}"),
+        ("query_id=a%0Ab&auth_date=1", "field 'query_id': contains a line feed"),
     ],
 )
 def test_a_strict_parse_rejection_names_the_rule_never_the_value(raw: str, expected: str) -> None:

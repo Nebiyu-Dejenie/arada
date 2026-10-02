@@ -33,6 +33,8 @@ the decoded bytes must be UTF-8, and both data-check-strings use the decoded
 values verbatim, hashed and signed over their UTF-8 bytes. Nothing else is
 normalised: no trimming, no Unicode normalisation, no JSON re-serialisation.
 This is confirmed only by the owner's live test-environment sample.
+A decoded value may not contain a line feed, the data-check-string separator
+(otherwise the signed string has more than one parse).
 
 Every failure raises ``InitDataRejected`` with a machine reason for logs and
 metrics. Callers must show clients one generic answer.
@@ -64,6 +66,7 @@ MAX_INIT_DATA_BYTES = 4096
 MAX_FIELDS = 64
 MAX_TELEGRAM_USER_ID = 2**53 - 1  # "at most 52 significant bits" (WebAppUser.id)
 HMAC_KEY_CONSTANT = b"WebAppData"
+_SEPARATOR = "\n"  # joins the data-check-string; never allowed inside a value
 
 _KEY = re.compile(r"[A-Za-z0-9_]{1,64}")
 # Raw query-string characters: unreserved, sub-delims used by encoders, and
@@ -140,7 +143,14 @@ def parse(raw: str) -> dict[str, str]:
         key = _decode_component(key_part)
         if not _KEY.fullmatch(key) or key in fields:
             raise InitDataRejected("malformed")
-        fields[key] = _decode_component(value_part)
+        value = _decode_component(value_part)
+        # The data-check-strings join fields with a line feed, so a value that
+        # contains one makes the signed string ambiguous: its holder could move
+        # field boundaries (even make ``user`` someone else) without changing a
+        # signed byte. Refusing it keeps the parse injective. (Deep audit F1.)
+        if _SEPARATOR in value:
+            raise InitDataRejected("malformed")
+        fields[key] = value
     return fields
 
 

@@ -361,3 +361,38 @@ async def test_logins_are_audited_inside_the_tenant_with_correlation_ids(
     failed = await telegram_login(client, sf.host, "user=%7B%7D")
     assert failed.status_code == 401
     assert await audit_rows(db, request_id=failed.headers["x-request-id"]) == []
+
+
+async def test_bot_management_refuses_cross_tenant_actors_archived_tenants_and_dead_bots(
+    client: httpx.AsyncClient, super_admin: Persona, world: World, telegram_signer: Signer
+) -> None:
+    """Deep audit (2026-10-02), RBAC gaps: an actor from another tenant, an
+    archived tenant, and a disabled bot."""
+    tenant, sf = await fresh(client, super_admin, world, "x-")
+    url = f"/v1/platform/tenants/{tenant.id}/telegram-bot"
+    bot_id, token = fake_bot()
+    # Staff of another tenant, including its owner, hold no bots.manage anywhere.
+    for persona in (world.b.owner, world.b.admin):
+        assert (await client.get(url, headers=persona.headers)).status_code == 403
+        assert (
+            await client.put(
+                url, headers=persona.headers, json={"bot_id": bot_id, "bot_token": token}
+            )
+        ).status_code == 403
+        assert (await client.delete(url, headers=persona.headers)).status_code == 403
+    # A disabled bot: gone for management and for logins.
+    assert (await client.delete(url, headers=super_admin.headers)).status_code == 204
+    assert (await client.get(url, headers=super_admin.headers)).status_code == 404
+    assert (await client.delete(url, headers=super_admin.headers)).status_code == 404
+    assert (await telegram_login(client, sf.host, sf.init_data(telegram_signer))).status_code == 401
+    # An archived tenant cannot be given a bot, and its host serves no logins.
+    for action in ("suspend", "archive"):
+        moved = await client.post(
+            f"/v1/platform/tenants/{tenant.id}:{action}", headers=super_admin.headers
+        )
+        assert moved.status_code == 200, (action, moved.text)
+    rebind = await client.put(
+        url, headers=super_admin.headers, json={"bot_id": bot_id, "bot_token": token}
+    )
+    assert rebind.status_code == 404
+    assert (await telegram_login(client, sf.host, sf.init_data(telegram_signer))).status_code == 404

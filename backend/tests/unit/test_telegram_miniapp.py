@@ -179,6 +179,46 @@ def test_oversized_but_otherwise_valid_input_fails(signer: Signer, bot: tuple[in
     assert reason(raw, signer, bot) == "malformed"
 
 
+def _resplit_to_impersonate(signer: Signer, bot: tuple[int, str]) -> tuple[str, str]:
+    """Deep audit 2026-10-02, finding F1. Telegram signs a ``\\n``-joined string,
+    so a value containing a line feed lets the holder move field boundaries
+    without changing a signed byte. If a link parameter (``start_param``)
+    could carry a line feed and JSON, its holder could turn ``user`` into
+    anyone. Returns (genuine, forged), both validly signed by ``signer``."""
+    bot_id, token = bot
+    victim = '{"id":424242,"first_name":"Victim"}'
+    genuine = signer.fields(
+        bot_id=bot_id,
+        bot_token=token,
+        user={"id": 1111, "first_name": "Attacker"},
+        extra={"start_param": "x\nuser=" + victim + "\nuserz="},
+    )
+    forged = {k: v for k, v in genuine.items() if k not in ("start_param", "user")}
+    forged.update(start_param="x", user=victim, userz="\nuser=" + genuine["user"])
+    signed = frozenset({"hash", "signature"})
+    assert miniapp.data_check_string(forged, exclude=signed) == miniapp.data_check_string(
+        genuine, exclude=signed
+    )
+    return encode(genuine), encode(forged)
+
+
+def test_a_value_containing_the_line_feed_separator_is_refused(
+    signer: Signer, bot: tuple[int, str]
+) -> None:
+    """Line feed separates the data-check-string, so a value containing one makes
+    the signed string ambiguous. Refusing it keeps the parse injective."""
+    genuine, forged = _resplit_to_impersonate(signer, bot)
+    assert reason(forged, signer, bot) == "malformed"  # would authenticate user 424242
+    assert reason(genuine, signer, bot) == "malformed"
+    bot_id, token = bot
+    for field in ("query_id", "start_param", "chat_instance"):
+        values = signer.fields(bot_id=bot_id, bot_token=token, extra={field: "a\nb"})
+        assert reason(encode(values), signer, bot) == "malformed", field
+    # A carriage return is not the separator and stays covered by both checks.
+    values = signer.fields(bot_id=bot_id, bot_token=token, extra={"start_param": "a\rb"})
+    assert check(encode(values), signer, bot)
+
+
 def test_unknown_fields_are_covered_by_hash_and_signature(
     signer: Signer, bot: tuple[int, str]
 ) -> None:
