@@ -2,10 +2,52 @@
 
 | Field | Value |
 |---|---|
-| **Status** | **Implemented; awaiting owner review.** Not production-ready: **B4 (authentication rate limiting) is open**, and the live test-environment sample (A8) and the pre-completion docs re-check are outstanding owner actions |
-| **Date** | 2026-10-01 |
+| **Status** | **Implemented, independently audited and hardened (2026-10-02); awaiting owner review.** Phase 2 is **not complete** until two owner actions are done: the live test-environment sample (A8) and the pre-completion docs re-check (§9). **Not production-ready and not safe for public exposure:** B4 (authentication rate limiting) and the other production gates are open |
+| **Date** | 2026-10-01; audit and hardening 2026-10-02 |
 | **Baseline** | `89bdfd6` (verified Telegram specification; B5 resolved) on top of Phase 1 approved at `4896f60` |
 | **Plan** | `PHASE_2_PLAN.md` (approved), owner decisions D1–D6 |
+
+## 0. Independent audit and hardening (2026-10-02)
+
+The owner authorised implementation on 2026-10-02. A first implementation already existed on branch `claude/laughing-knuth-aqzv3i` (commits `75743a5` and `c1f4427`, built directly on `89bdfd6`). It was treated as an **unreviewed draft**, not as evidence. The audit:
+
+1. **Baseline.** `89bdfd6` is an ancestor of the work, so the approved documentation is incorporated unchanged.
+2. **Line-by-line review against the verified specification** (`PHASE_2_PLAN.md` §5):
+   - HMAC key `HMAC_SHA256("WebAppData", token)`;
+   - the HMAC string excludes only `hash`, so it includes `signature` and unknown fields;
+   - the Ed25519 string is `<bot_id>:WebAppData\n` followed by every field except `hash` and `signature`;
+   - base64url with optional padding, and exactly 64 bytes;
+   - `hash` is compared as 32 bytes in constant time;
+   - crypto is checked before freshness;
+   - the two key fingerprints were recomputed from the documented hex keys and match.
+3. **Every gate re-run**, then **13 sabotage proofs run independently** (table below).
+4. **Defects found and fixed, test-first.** Each new test was observed failing before the fix:
+
+| Finding | Severity | Fix | Test (failed first, then passed) |
+|---|---|---|---|
+| A Telegram-signed `auth_date` beyond year 9999 raised an unhandled `ValueError`, so the client got a 500, not the generic 401 | Low: only reachable with Telegram-signed data | It is `malformed` | `test_stale_future_and_non_integer_auth_date` (2 new cases) |
+| Replay rows are pruned by the database clock, but freshness uses the application clock. With clock drift, a row could be pruned while its `initData` was still fresh, reopening a reuse window | Low | `expires_at = auth_date + max_age + future_skew + 5 min` | `test_replay_rows_outlive_the_freshness_window` |
+| The runtime role's column grants allowed un-revoking a customer session, reactivating a disabled bot or resetting a replay counter. Only service code prevented it | Defence in depth (ADR-033) | Migration **0011**: forward-only triggers that bind every role | `test_revocation_disabling_and_replay_counts_only_move_forward` |
+| Staging accepted any Ed25519 key, so it could run with a non-Telegram key | Configuration safety | Only `development` and `test` may use a throwaway key; staging and production need a key Telegram publishes, matching `telegram_environment` | `test_staging_accepts_only_telegrams_published_keys` |
+| A Phase 1 test read only the first audit page (50 events), so more tenant-A events from storefront tests made it fail depending on order | Test fragility; the product behaved correctly | The test reads every page; the assertion is unchanged | `test_tenant_a_admin_manages_tenant_a` |
+
+**Independent sabotage proofs (2026-10-02).** Each break was applied by a script, then the Telegram, storefront, RLS and tenant-isolation suites were run and the code restored. `git status` was clean after each run.
+
+| Break | Failing tests |
+|---|---|
+| `signature` excluded from the HMAC string | 76 |
+| Ed25519 verification skipped | 6 (forged, wrong bot id, other environment, unsigned, …) |
+| `bot_id` left out of the signed message | 73 |
+| Login Widget derivation `SHA256(token)` | 76 |
+| freshness skipped | 2 |
+| only lower-case `hash` accepted | 1 |
+| unknown fields dropped from the strings | 1 |
+| replay window disabled | 3 |
+| failure reason returned to the client | 5 |
+| raw `initData` logged | 1 |
+| customer-session RLS opened and the tenant check removed | 50, including `test_customer_routes_refuse_missing_bad_and_foreign_tokens` (#15) |
+| `initDataUnsafe` planted in server code | 1 |
+| part of the bot token logged at registration | 1 |
 
 Each claim below names its evidence. "Test" means an automated test that runs in CI (`uv run pytest`). The important tests were also shown to fail against deliberately broken implementations (§8).
 
@@ -35,6 +77,7 @@ The layers are separated by import-linter contracts (`backend/pyproject.toml`; `
 
 **New:**
 - `backend/migrations/versions/0010_telegram_customers.py`
+- `backend/migrations/versions/0011_customer_auth_guards.py` (2026-10-02)
 - `backend/src/arada/telegram/{__init__,miniapp}.py`: the pure Mini App validator
 - `backend/src/arada/bots/{__init__,tables,service}.py`: bot binding and the replay window
 - `backend/src/arada/customers/{__init__,tables,service,sessions,telegram_login}.py`
@@ -86,6 +129,13 @@ All four tables carry `tenant_id` and have **ENABLE + FORCE RLS** with policies 
 - `test_code_table_declarations_match_migrated_schema`: no drift.
 - A fresh database migrated from zero served the Phase 1 walkthrough on a real uvicorn server, 10/10 steps (§7).
 
+**Migration 0011 (2026-10-02).** It adds three `BEFORE UPDATE OF …` triggers whose functions run with a pinned `search_path` and have EXECUTE revoked from PUBLIC:
+- a revoked customer session keeps its `revoked_at` and `revoked_reason`;
+- a disabled bot cannot be reactivated, and its `disabled_at` cannot change;
+- a replay `use_count` only increases.
+
+There are no new tables, grants or SECURITY DEFINER functions. The rollback is `downgrade()` to 0010, which drops the triggers and functions with no data loss.
+
 **Rollback.** `downgrade()` drops the four tables and the schema. The data lost is only Phase 2 data: bots, customers, customer sessions and replay rows.
 
 ## 4. API changes
@@ -128,27 +178,28 @@ There is no JWT and no refresh endpoint (ADR-036).
 - **Staff tokens are refused on customer routes:** `test_customer_routes_refuse_missing_bad_and_foreign_tokens`.
 - **Phase 1 RBAC and MFA suites unchanged and green (44).** That includes SUPER_ADMIN revocation and session rotation.
 
-## 7. Test results (this environment, 2026-10-01)
+## 7. Test results (re-run 2026-10-02, after the hardening)
 
 | Gate | Result |
 |---|---|
-| Full suite | **311 passed, 0 failed** (Phase 1 ended at 214) |
+| Full suite | **314 passed, 0 failed** (Phase 1 ended at 214; 311 before the hardening) |
 | Coverage | **91%** lines (`--cov=arada`); new modules 87–98% |
 | ruff check + format | clean (backend and `scripts/`) |
-| mypy (strict) | no issues, 123 source files |
+| mypy (strict) | no issues, 124 source files |
 | lint-imports | 5 contracts kept, 0 broken |
 | pip-audit | no known vulnerabilities; **no new runtime dependency** (Ed25519 comes from `cryptography`, already present) |
-| Migrations | from zero, round trip, no drift |
+| Migrations | from zero to 0011, round trip, no drift |
+| Database used | PostgreSQL **16.14** on loopback in the agent sandbox (no Docker daemon there). The compose stack pins 17, and CI runs against the compose version |
 | Fresh-stack walkthrough | new database migrated from zero, real uvicorn, CLI bootstrap, `scripts/phase1_walkthrough.py`: **10/10** |
 | Container image scan | **not run here**: the sandbox cannot pull the base image (ghcr.io denied) or Trivy's database. CI runs it on pull requests and pushes to `main`; it has not run for these commits yet |
 
 **Phase 2 suites:**
-- validator unit 56
+- validator unit 56 (two cases added inside an existing test)
 - sample-checker unit 2
-- Telegram security 16
-- storefront API and integration 11
-- RLS 35 (was 23)
-- all security tests 94
+- Telegram security 17
+- storefront API and integration 12
+- RLS 36 (was 23)
+- all security tests 96
 
 ## 8. Security tests: the owner's list, with evidence
 
@@ -159,10 +210,10 @@ There is no JWT and no refresh endpoint (ADR-036).
 | 3 | invalid HMAC | `test_every_rejection…`; unit `test_tampering_with_any_signed_field_fails`, `test_hash_made_with_another_bot_token_fails` |
 | 4 | invalid Ed25519 | `test_every_rejection…`; unit `test_signature_padding_alphabet_and_length` |
 | 5 | expired / auth_date policy | `test_every_rejection…` (stale, future); unit `test_stale_future_and_non_integer_auth_date` |
-| 6 | replay | `test_replayed_init_data_is_refused_after_the_use_cap` (30 concurrent uses of one initData: exactly 20 accepted); `test_reloads_within_the_window_work_and_stop_when_it_closes` |
+| 6 | replay | `test_replayed_init_data_is_refused_after_the_use_cap` (30 concurrent uses of one initData: exactly 20 accepted); `test_reloads_within_the_window_work_and_stop_when_it_closes`; `test_replay_rows_outlive_the_freshness_window`; `test_revocation_disabling_and_replay_counts_only_move_forward` |
 | 7 | cross-tenant bot mismatch | `test_every_rejection…` ("cross-tenant") |
 | 8 | wrong bot_id | `test_wrong_registered_bot_id_fails_closed`; unit `test_signature_for_another_bot_id_fails` |
-| 9 | wrong environment / public key | `test_signature_from_the_other_telegram_environment_is_refused`; `test_production_refuses_the_test_key_and_any_mismatch`; unit `test_test_environment_signature_is_refused_under_the_production_key` |
+| 9 | wrong environment / public key | `test_signature_from_the_other_telegram_environment_is_refused`; `test_production_refuses_the_test_key_and_any_mismatch`; `test_staging_accepts_only_telegrams_published_keys`; unit `test_test_environment_signature_is_refused_under_the_production_key` |
 | 10 | missing required fields | `test_every_rejection…`; unit `test_missing_required_fields_fail`, `test_duplicate_fields_fail` |
 | 11 | other Telegram mechanisms | `test_every_rejection…` (Login Widget, OIDC id_token); unit `test_login_widget_mechanism_never_validates_mini_app_data`, `test_an_openid_connect_id_token_is_not_init_data` |
 | 12 | unauthorized customer access | `test_customer_routes_refuse_missing_bad_and_foreign_tokens`; `test_customer_authentication_grants_no_business_permission` |
@@ -205,7 +256,7 @@ There is no JWT and no refresh endpoint (ADR-036).
 ## 9. Live test-environment sample and docs re-check
 
 - **Live sample: NOT DONE (owner action).** It needs a Telegram test-environment account and bot, which this environment does not have, and the sample must never be committed. Run `cd backend && uv run python ../scripts/telegram_sample_check.py` (runbook §6), preferably with an Amharic name containing a space. The checker reports whether Telegram's hash and signature match the A8 reading or an alternative reading. **Until it reports A8 MATCH for both, conformance with Telegram is unverified.**
-- **Official docs re-check: NOT DONE here.** `core.telegram.org` is still denied by this environment's network policy, re-tried on 2026-10-01. The last check is the owner's B5 verification (`PHASE_2_PLAN.md` §14, page hashes recorded). Re-check from the workstation before accepting Phase 2.
+- **Official docs re-check: NOT DONE here.** `core.telegram.org` is still denied by this environment's network policy; the proxy answered `403` on 2026-10-01 and again on 2026-10-02. The last check is the owner's B5 verification (`PHASE_2_PLAN.md` §14, page hashes recorded). Re-check from the workstation before accepting Phase 2.
 
 ## 10. ADR changes
 
@@ -223,6 +274,8 @@ There is no JWT and no refresh endpoint (ADR-036).
 - **Keyboard-button and inline-mode launches** carry no `initData`, so they cannot log in (Telegram behaviour, `PHASE_2_PLAN.md` §5 row 15).
 - **Re-verify the Host header trust** at the first deployment (edge configuration); nothing is deployed.
 - **The replay window is per tenant and in PostgreSQL**, pruned opportunistically. There is no scheduler.
+- **Timing is not uniform across failure reasons.** A host with no bot answers faster than a crypto failure, so response timing can reveal whether a merchant host has a bot bound. The body is identical. This is low impact, since bot binding is not secret, and it is bounded by B4.
+- **Staff sessions (Phase 1) do not have the forward-only revocation trigger** that migration 0011 gives customer sessions. Their revocation is enforced by service code and column grants, as approved in Phase 1. Adding the same trigger to `control.sessions` would be a separate, owner-approved Phase 1 hardening; it was deliberately not changed here.
 - **CI has not run on these commits:** the workflow triggers on pull requests and `main` only. The container scan likewise (§7).
 
 ## 12. Status
@@ -236,7 +289,8 @@ There is no JWT and no refresh endpoint (ADR-036).
 | Authorization integration and credential separation | **Implemented, verified by test** |
 | Audit and correlation | **Implemented, verified by test**; failure metrics are logs only |
 | Database and RLS changes | **Implemented, verified by test** (SQL-level, as the runtime role) |
-| Official docs re-check before completion | **Blocked here** (network policy); owner action |
+| Official docs re-check before completion | **Blocked here** (network policy); owner action. Compare the page hashes with `PHASE_2_PLAN.md` §14 |
+| Forward-only database invariants (migration 0011) | **Implemented, verified by test** (2026-10-02) |
 | Authentication rate limiting (B4) | **Open: REQUIRED BEFORE PUBLIC EXPOSURE** |
 | Webhooks, deep links, notifications, managed bots, frontend, Redis, payments, Merchant Factory, deployment | **Not implemented** (non-goals) |
 | Production readiness | **No** |

@@ -11,7 +11,7 @@ Labels:
 | **Assumed** | A documented assumption (Permanent Command §53) |
 | **Deferred** | Intentionally postponed, with the reason given |
 
-Last updated: 2026-10-01. Phase 1 is **approved**. Phase 2 (Telegram foundation) is implemented and **awaits owner review**; the live test-environment sample (A8) is outstanding. Nothing is production-ready: **B4 (authentication rate limiting) is open**.
+Last updated: 2026-10-02. Phase 1 is **approved**. Phase 2 (Telegram foundation) is implemented, independently audited and hardened on 2026-10-02, and **awaits owner review**; the live test-environment sample (A8) is outstanding. Nothing is production-ready: **B4 (authentication rate limiting) is open**.
 
 ## Phase 1: platform kernel
 
@@ -19,7 +19,7 @@ Last updated: 2026-10-01. Phase 1 is **approved**. Phase 2 (Telegram foundation)
 |---|---|---|
 | Project structure: modular monolith with import contracts | Implemented | `backend/src/arada/*`; `lint-imports` in CI |
 | Typed central configuration; `ROOT_DOMAIN` as configuration (TBD) | Implemented | `kernel/config.py`; production guards tested |
-| Database foundation: schemas `control` and `commerce` (Phase 2), 10 migrations, least-privilege roles | Implemented | `backend/migrations/`; zero → head → base → head round trip tested |
+| Database foundation: schemas `control` and `commerce` (Phase 2), 11 migrations, least-privilege roles | Implemented | `backend/migrations/`; zero → head → base → head round trip tested |
 | Code/schema drift detection | Implemented | `tests/integration/test_migrations.py` |
 | UUIDv7 identifiers | Implemented | `kernel/ids.py` |
 | Identity: persons, provider identities, argon2id passwords, lockout | Implemented | `identity/`; `tests/api/test_identity.py` |
@@ -69,7 +69,8 @@ Evidence and test lists are in `reports/PHASE_2.md`.
 | Host → tenant → that tenant's bot (client never names a tenant) | Implemented | `customers/telegram_login.py`; `test_client_supplied_tenant_hints_never_choose_the_tenant` |
 | Telegram identity → global person → per-tenant customer (`commerce.customers`) | Implemented | `identity/telegram.py`, `customers/service.py`; race test |
 | Customer sessions: opaque, server-side, bound to tenant and customer by FORCE RLS | Implemented | ADR-036; `customers/sessions.py`; `access/customer.py` |
-| Replay window per `initData` (reuse window + use cap; our policy) | Implemented | `bots/service.py:record_init_data_use`; concurrent replay test |
+| Replay window per `initData` (reuse window + use cap; our policy) | Implemented | `bots/service.py:record_init_data_use`; concurrent replay test; prune margin `test_replay_rows_outlive_the_freshness_window` |
+| Forward-only invariants in the database: customer-session revocation, bot disabling, replay counters | Implemented | Migration 0011; `test_revocation_disabling_and_replay_counts_only_move_forward` |
 | Generic 401 for every failed Telegram login; reason in logs only | Implemented | D5; `test_every_rejection_is_the_same_generic_401_with_a_logged_reason` |
 | Customer and staff credentials never interchangeable | Implemented | OpenAPI-driven sweep `test_customer_tokens_are_refused_by_every_staff_operation` |
 | Audit: person and customer creation, customer login and logout, bot registration and disabling, with request and trace ids | Implemented | `test_logins_are_audited_inside_the_tenant_with_correlation_ids` |

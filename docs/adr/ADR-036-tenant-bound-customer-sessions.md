@@ -13,7 +13,7 @@ A customer who logs in (in Phase 2, with Telegram Mini App `initData`) receives 
 - **Tenant binding by the database.** `customer_sessions` is under FORCE RLS. A token is looked up only inside the tenant that the request `Host` resolves to (`access/customer.py:customer_scope`), so tenant A's token is invisible at tenant B's host. `(tenant_id, customer_id)` is a composite foreign key to `commerce.customers`, and the runtime role cannot update `tenant_id`, `customer_id`, `token_hash` or `expires_at` (column-level grants).
 - **Separate from staff sessions.** Staff tokens live in `control.sessions` and are checked by `api/auth.py:authenticated`. Customer tokens live in `control.customer_sessions` and are checked only by `access/customer.py`. The principal types differ (`Principal` and `CustomerPrincipal`), so neither token works on the other's routes.
 - **No authorisation from authentication.** A `CustomerScope` carries identity, never permissions. Business functions decide what a customer may do, by proving that a resource is the caller's own (`customer_id`) inside the scope's tenant.
-- **Revocation.** Logout revokes one session. Replacing or disabling the tenant's bot revokes all of that tenant's customer sessions. Disabling the person, or the tenant leaving `active`, makes every session fail immediately.
+- **Revocation.** Logout revokes one session. Replacing or disabling the tenant's bot revokes all of that tenant's customer sessions. Disabling the person, or the tenant leaving `active`, makes every session fail immediately. Revocation is **one-way in the database**: a trigger (migration 0011) refuses any change to `revoked_at` or `revoked_reason` once a session is revoked, for every role. A faulty code path therefore cannot resurrect a session (ADR-033 principle).
 
 ## Context
 `04` §5 and `17` proposed a 15-minute EdDSA JWT plus a 12-hour refresh handle. The owner approved opaque tenant-bound sessions in principle (D4) and directed that no JWT or refresh architecture be introduced merely because an older document proposed it.
@@ -35,3 +35,4 @@ It reuses the reviewed ADR-029 and ADR-035 mechanics. Revocation is immediate. T
 | Date | Change |
 |---|---|
 | 2026-10-01 | Proposed and implemented in Phase 2 after owner decision D4. |
+| 2026-10-02 | Revocation made one-way by a database trigger (migration 0011). Still Proposed, awaiting the owner's final review. |

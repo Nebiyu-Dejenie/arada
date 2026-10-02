@@ -55,7 +55,7 @@ Numbers from a developer laptop are **not** sizing numbers (ADR-004 Evidence). R
 
 Telegram logins are **off** until a key is configured. Every attempt then fails closed with the generic 401.
 
-- `ARADA_TELEGRAM_ENVIRONMENT=test` and `ARADA_TELEGRAM_PUBLIC_KEY_HEX=<Telegram's test key>`. The key value is in ADR-012; it is public. A key that does not match the environment is refused at startup, and production accepts only Telegram's production key.
+- `ARADA_TELEGRAM_ENVIRONMENT=test` and `ARADA_TELEGRAM_PUBLIC_KEY_HEX=<Telegram's test key>`. The key value is in ADR-012; it is public. A key that does not match the environment is refused at startup. Production accepts only Telegram's production key, and staging only a key Telegram publishes. A throwaway key works only in `development` and `test`.
 - Bind a **test** bot to a tenant: `PUT /v1/platform/tenants/{id}/telegram-bot` with `{bot_id, bot_token}`, as a platform admin with MFA. Use a bot in Telegram's test environment, never a production bot.
 - **Live conformance check (assumption A8).**
   1. Open the test bot's Mini App with a test account whose name has non-ASCII characters and a space.

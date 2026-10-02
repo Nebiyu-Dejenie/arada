@@ -95,5 +95,6 @@ Architecture, implementation, database, migration, authorization, tenant isolati
 - Customer tokens and staff tokens never share a table, a dependency or a principal type. Every new non-storefront route is covered automatically by the OpenAPI-driven customer-token sweep in `tests/security/test_telegram_auth.py`.
 - The RLS lint scans every application schema (`APP_SCHEMAS` in `test_rls_coverage.py`); a new schema must be added there. `TENANT_TABLES` uses schema-qualified names.
 - Give the runtime role column-level UPDATE grants that never include `tenant_id`, binding columns, tokens or expiry.
+- A value the runtime role may update but must never roll back (revocation, disabling, counters) gets a forward-only trigger (migration 0011), not just a column grant.
 - Unauthenticated endpoints commit no database writes on failure. Failures go to logs, not the audit trail (register B4).
 - Never put real Telegram tokens, raw `initData`, signatures or personal data in the repository. Tests generate throwaway keys and fake tokens (`tests/telegram_kit.py`).
