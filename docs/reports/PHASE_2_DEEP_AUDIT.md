@@ -5,8 +5,39 @@
 | **Scope** | Code-only audit of the Phase 2 Telegram foundation, treated as untrusted again (owner directive 2026-10-02, while the two external completion gates are pending) |
 | **Commit audited** | `a496061` on `claude/elegant-lovelace-52pep5` |
 | **Date** | 2026-10-02 |
-| **Result** | **One HIGH (conditional) defect found and fixed**: a parser ambiguity that could allow impersonation. No other significant defect. Phase 2 is **not complete**: the live sample (A8) and the official docs re-check are still pending (`PHASE_2.md` §9). B4 is open |
+| **Result** | **One HIGH (conditional) defect found and fixed (F1):** a parser ambiguity around the line-feed field separator that could allow impersonation. **Real-world exploitability: UNVERIFIED.** No other confirmed vulnerability: F2 was a test gap, F3 is a LOW residual, and F4–F9 are informational or deferred items. Phase 2 is **not complete** (§0) |
+| **Evidence revision** | 2026-10-02: F1 classification, exact evidence (§0.1), F4 lifecycle (§F4) and gate statuses (§0) made explicit. Documentation only; code identical to `98dd1b7` |
 | **Not done** | Nothing was merged, deployed or configured. Phase 1 behaviour is unchanged. No B4 work. No Telegram network access (core.telegram.org is denied by the environment), so nothing here changes or confirms the protocol reading. **A8 remains unverified** |
+
+## 0. Status (2026-10-02)
+
+| Item | Status |
+|---|---|
+| B4, authentication rate limiting | **REQUIRED BEFORE PUBLIC EXPOSURE** (not implemented) |
+| Gate 1, live Telegram test-environment sample (A8) | **OPEN** |
+| Gate 2, fresh official Telegram documentation verification | **OPEN** (core.telegram.org is denied by this environment's network policy) |
+| Phase 3 | **BLOCKED** |
+| Production exposure | **NOT APPROVED** |
+| Merge into `main` | **NOT AUTHORIZED** |
+
+### 0.1 Evidence record
+
+| Evidence | Exact reference |
+|---|---|
+| Commit audited | `a496061` |
+| Commit containing the F1 fix | `98dd1b7` `fix(telegram): refuse the line-feed separator inside initData values`. It touches `backend/src/arada/telegram/miniapp.py` (the fix), `scripts/telegram_sample_check.py` (diagnostic) and four test files |
+| Commit containing this report | `49f8896`; this evidence revision is a later documentation-only commit. `git diff 98dd1b7 HEAD -- backend scripts` is empty |
+| F1 unit regression test | `backend/tests/unit/test_telegram_miniapp.py::test_a_value_containing_the_line_feed_separator_is_refused` |
+| F1 end-to-end identity and session test | `backend/tests/security/test_telegram_auth.py::test_a_resplit_signed_string_cannot_impersonate_another_user`. Before the fix, the API returned 200 and a customer session for the victim's Telegram id. After it: generic 401, logged reason `malformed`, and no `telegram` identity row for the victim |
+| F1 checker diagnostic | `backend/tests/unit/test_telegram_sample_script.py::test_a_strict_parse_rejection_names_the_rule_never_the_value` (7 parametrised cases, one of them F1) |
+| F2 RBAC test | `backend/tests/api/test_storefront_auth.py::test_bot_management_refuses_cross_tenant_actors_archived_tenants_and_dead_bots` |
+| Regression tests failed first | The three F1 tests failed before the fix (3 failed, 82 passed in the affected files). The F2 test failed with the archived-tenant guard removed |
+| Full suite | `cd backend && uv run pytest -q` → **325 passed, 0 failed** (re-run on the current head, 2026-10-02) |
+| Security suite | `uv run pytest -q tests/security` → **97 passed** |
+| The four F1/F2 tests above | **10 passed** (10 test cases, counting the parametrised ones) |
+| Static gates | `ruff check . ../scripts` clean; `ruff format --check` clean; `mypy` (strict) no issues in 124 files; `lint-imports` 5 kept, 0 broken |
+| Test database | **PostgreSQL 16.14** (Ubuntu package), on loopback in the agent sandbox, which has no Docker daemon |
+| Stack database | **PostgreSQL 17** (`compose.yaml`: `postgres:17-alpine`). CI starts that service (`docker compose up -d --wait postgres`), but **CI has not run on these commits**: the workflow triggers on pull requests and `main` only. Results on 17 are therefore **not yet observed** |
 
 ## 1. Method
 
@@ -25,7 +56,7 @@
 
 | ID | Severity | Finding | Status |
 |---|---|---|---|
-| F1 | **HIGH (conditional)** | The data-check-string has more than one parse when a value contains a line feed, which enables impersonation | **Fixed** (validator), regression tests |
+| F1 | **HIGH (conditional)** | Parser ambiguity: a decoded value could contain the line-feed field separator, so the signed data-check-string had more than one parse, which enables impersonation. Real-world exploitability **UNVERIFIED** | **Fixed** in `98dd1b7` (defensive; correct either way) |
 | F2 | LOW | No tests for bot management by a cross-tenant actor, on an archived tenant, or after a bot is disabled (behaviour was correct) | **Fixed** (test added, sabotage-proven) |
 | F3 | LOW | Response timing differs by failure path (no bot ≈ 1 ms faster than a crypto failure, in-process) | Accepted residual; bounded by B4 |
 | F4 | INFORMATIONAL | Replay state is per tenant, so after a bot moves to another tenant, the same fresh `initData` can be used once more there | Accepted |
@@ -35,7 +66,14 @@
 | F8 | INFORMATIONAL | Failed logins are logged with a reason but are not in the audit trail, and there are no metrics | By design (B4); later work |
 | F9 | INFORMATIONAL | Phase 1 staff sessions have no forward-only revocation trigger | Not changed (Phase 1 boundary); proposal only |
 
+**Only F1 is a confirmed defect in code.** F2 was a missing test; the behaviour was correct. F3 is a LOW residual, not a vulnerability. **F4–F9 are informational or deferred items. None is a confirmed vulnerability**, and no exploit path was demonstrated for any of them.
+
 ### F1 — HIGH (conditional): ambiguous data-check-string allows impersonation
+
+**Classification.**
+- **Cause:** parser ambiguity around the line-feed field separator. Both data-check-strings join fields with `\n`, and `parse()` accepted a decoded value containing `\n`. The mapping from fields to signed bytes was therefore not one-to-one.
+- **Fix:** defensive, and correct whether or not Telegram currently permits a line feed in `start_param` or in any other value. With the separator refused inside values, the parse is unique by construction. Nothing a correct Telegram client sends without a line feed in a value is affected.
+- **Real-world exploitability: UNVERIFIED.** It depends on whether Telegram will sign an attacker-chosen value containing a line feed and JSON characters (in practice `start_param`). That stays unverified until the official documentation check (Gate 2) and the live sample (Gate 1) are done. Neither gate can **disprove the need for the fix**; they can only settle whether the defect was ever exploitable.
 
 **Symptom.** The validator accepted `initData` whose fields differ from the ones Telegram signed, with the same signature and hash.
 
@@ -76,27 +114,45 @@ Medians of 60 in-process requests: malformed 8.6 ms, bad hash 8.0 ms, no bot 7.0
 
 ### F4 — INFORMATIONAL: replay state after a bot moves between tenants
 
-Probe: a bot was disabled at A and bound to B, and the same still-fresh `initData` was accepted once more at B. Replay rows are keyed `(tenant_id, hash)` under RLS. This needs a platform-admin transfer, the data proves the genuine Telegram user of that bot, and the window is at most `max_age`. **Accepted.** Note it in the bot-transfer runbook when transfers become a feature.
+**Observed behaviour (probe, 2026-10-02).**
+1. Bot X is active for tenant A.
+2. A Telegram user opens X's Mini App and logs in at A's host with `initData` D. A replay row `(A, hash(D))` is written.
+3. A platform admin disables X at A, which revokes A's customer sessions, and binds X (same `bot_id`, same token) to tenant B.
+4. Within D's freshness window (`auth_date` + 1 h), D is presented at B's host. HMAC passes (same token) and Ed25519 passes (same `bot_id`). There is no replay row `(B, hash(D))`, so it is a first use at B. A customer and a session are created at **B** for that Telegram user.
+5. D at A's host gets 401 (A has no bot).
 
-### F5 — INFORMATIONAL: bot lookup relies on RLS alone
+**The lifecycle question.** Is `initData` bound to the **bot** (Telegram's binding: `bot_id` in the signed string, the token in the HMAC) or to the **tenant that owned the bot when the user opened the Mini App** (ARADA's mapping)? The implementation binds it to the bot, and to the tenant only through the bot's *current* binding. Replay state is per tenant (`PRIMARY KEY (tenant_id, hash_digest)`, as approved in `PHASE_2_PLAN.md` §7), so it does not follow a bot across tenants.
+
+**Invariant check: no violation found.**
+- Tenant from Host: holds (B's host gives B).
+- Bot bound to one tenant: holds (X belongs only to B at that moment).
+- Identity: genuine (the Telegram user of bot X).
+- No staff or cross-tenant privilege is gained; A's sessions were revoked.
+- The use cap at B still applies.
+
+What happens is that a user whose Mini App was opened while X served A is admitted at B, the bot's current owner, at most once per replay window, within one hour of `auth_date`. Reopening the Mini App after the transfer would give the same result. **Not a confirmed vulnerability. No implementation change.**
+
+**Open for a future bot-transfer feature (owner decision, not Phase 2):** whether `initData` with an `auth_date` before the current binding's `created_at` should be refused. That would make the tenant at Mini App launch authoritative. Bot transfer is not a Phase 2 feature; it is reachable only by a platform admin through disable then re-bind.
+
+### F5 — INFORMATIONAL: bot lookup relies on RLS alone (not a vulnerability)
 
 `bots.active_bot_for_login`, `_active`, `_disable_active` and `customer_sessions.revoke_all_in_tenant` have no explicit `tenant_id` predicate; they rely on FORCE RLS under the Host-resolved context, as ADR-034 intends. Without any context, RLS returns zero rows (fail closed). **Sabotage evidence:** with a permissive policy added to `telegram_bots`, the suite fails massively (logins fail, and every per-table RLS test errors). Removing FORCE RLS is caught by the RLS lint. **No change**: adding predicates would be purity without new evidence.
 
-### F6 — INFORMATIONAL: unbounded session lifetime settings
+### F6 — INFORMATIONAL: unbounded session lifetime settings (configuration hygiene; deferred)
 
 `Settings(customer_session_absolute_timeout_hours=10**6)` is accepted, and so is the Phase 1 staff equivalent. These are operator configuration, not client input. **No change**: the staff bound would touch Phase 1. Recommend an upper bound in a future configuration review.
 
-### F7 — INFORMATIONAL: cost of an unauthenticated request
+### F7 — INFORMATIONAL: cost of an unauthenticated request (input to B4; deferred)
 
 A rejected login costs host resolution (2 queries), setting the context (1), the bot read (1), one envelope decryption (2× AES-GCM) and one HMAC. It commits no writes. `Ed25519` runs only after a valid HMAC. The request body may be up to `max_request_body_bytes` (1 MiB), and the 4 KiB `init_data` cap applies after JSON parsing. **Input for B4:** consider a structural pre-parse before database work, and a per-route body limit. Not done here.
 
-### F8 — INFORMATIONAL: failed logins are not audited, and there are no metrics
+### F8 — INFORMATIONAL: failed logins are not audited, and there are no metrics (by design; deferred)
 
 Failures go only to `telegram.auth_failed` log events with `reason`, `request_id`, `trace_id` and `tenant_id`. That is deliberate: an unauthenticated endpoint commits no writes on failure (register B4). Investigation is possible from logs (§8). Alerting later needs a metrics backend: counters by `reason` and tenant, and rates of `bad_signature` and `replayed`.
 
-### F9 — INFORMATIONAL: staff-session revocation parity
+### F9 — INFORMATIONAL: staff-session revocation parity (defence in depth; deferred)
 
-`control.sessions` (Phase 1) may un-revoke via its column grants; its revocation is enforced by code. Per the owner's boundary, **not changed**. A proposal for a separate decision: the same `BEFORE UPDATE OF revoked_at` guard as migration 0011, in its own migration with its own tests.
+`control.sessions` (Phase 1) has no database trigger against un-revoking. Its column grants would allow it, but **no code path does so**: revocation is enforced by code, as approved in Phase 1. This is a defence-in-depth difference, not a vulnerability. Per the owner's boundary, **not changed**. A proposal for a separate decision: the same `BEFORE UPDATE OF revoked_at` guard as migration 0011, in its own migration with its own tests.
 
 ## 3. Cryptographic trace (raw `initData` → verified identity)
 
@@ -279,6 +335,7 @@ All of this is bounded by B4.
 - **Full suite:** 325 passed, 0 failed (321 before). Coverage is 91%; `miniapp.py` is at 98%.
 - **Security suite:** 97 passed.
 - **Static checks:** ruff and format clean; mypy (strict) clean on 124 files; lint-imports 5/5 kept.
+- **Database:** PostgreSQL 16.14 in the agent sandbox; the stack and CI use PostgreSQL 17, not yet observed for these commits (§0.1).
 
 ## 13. Recommendation
 
@@ -286,11 +343,13 @@ All of this is bounded by B4.
 
 When the owner re-checks the docs (Gate 2), confirm in addition whether the official text states the allowed characters of `start_param`. That records whether F1 was ever exploitable; the fix stays either way.
 
-**Remaining external gates, unchanged:**
-- live Telegram test-environment sample (A8);
-- fresh official Telegram documentation re-check.
-
-**AUTHENTICATION RATE LIMITING = REQUIRED BEFORE PUBLIC EXPOSURE (B4).** F3 and F7 are inputs to it.
+**Status (see §0):**
+- live Telegram test-environment sample (A8): **OPEN**;
+- fresh official Telegram documentation verification: **OPEN**;
+- **B4: AUTHENTICATION RATE LIMITING = REQUIRED BEFORE PUBLIC EXPOSURE** (F3 and F7 are inputs to it);
+- Phase 3: **BLOCKED**;
+- production exposure: **NOT APPROVED**;
+- merge into `main`: **NOT AUTHORIZED**.
 
 **Deferred:**
 - the F9 proposal, for a separate decision on Phase 1;

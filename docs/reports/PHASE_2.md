@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Implementation: **IMPLEMENTED**. Security testing: **VERIFIED** (owner, 2026-10-02). Completion: **BLOCKED** on two final gates (§9): Gate 1, the live sample (A8), and Gate 2, the official docs re-check. **Do not merge into `main` until both pass.** **Not production-ready and not safe for public exposure:** B4 (authentication rate limiting) and the other production gates are open |
+| **Status** | Implementation: **IMPLEMENTED**. Security testing: **VERIFIED** (owner, 2026-10-02). Completion: **BLOCKED** on two final gates (§9): Gate 1, the live sample (A8), **OPEN**, and Gate 2, the official docs verification, **OPEN**. Merge into `main`: **NOT AUTHORIZED**. Phase 3: **BLOCKED**. Production exposure: **NOT APPROVED**. Deep audit: `PHASE_2_DEEP_AUDIT.md` (F1 fixed in `98dd1b7`; its real-world exploitability is UNVERIFIED). **Not production-ready and not safe for public exposure:** B4 (authentication rate limiting) and the other production gates are open |
 | **Date** | 2026-10-01; audit and hardening 2026-10-02 |
 | **Baseline** | `89bdfd6` (verified Telegram specification; B5 resolved) on top of Phase 1 approved at `4896f60` |
 | **Plan** | `PHASE_2_PLAN.md` (approved), owner decisions D1–D6 |
