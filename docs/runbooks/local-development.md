@@ -59,9 +59,10 @@ Telegram logins are **off** until a key is configured. Every attempt then fails 
 - Bind a **test** bot to a tenant: `PUT /v1/platform/tenants/{id}/telegram-bot` with `{bot_id, bot_token}`, as a platform admin with MFA. Use a bot in Telegram's test environment, never a production bot.
 - **Live conformance check (assumption A8).**
   1. Open the test bot's Mini App with a test account whose name has non-ASCII characters and a space.
-  2. Copy `Telegram.WebApp.initData`.
-  3. Run `cd backend && uv run python ../scripts/telegram_sample_check.py`. It asks for everything with hidden input and prints verdicts only.
-  4. **Never** paste the sample, the token or the output values into the repository, an issue or a chat.
+  2. Copy `Telegram.WebApp.initData`, and note `Telegram.WebApp.initData.length`.
+  3. Run `cd backend && pbpaste | uv run python ../scripts/telegram_sample_check.py --init-data-stdin`. Piping avoids the terminal's line limit (1024 bytes on macOS), which would silently cut a long sample. Without the flag, the script asks for the sample with hidden input. It asks for the bot id, token and key with hidden input either way.
+  4. Check that the printed length equals `initData.length`. Then read the verdicts. Pass criteria and the failure procedure are in `docs/reports/PHASE_2.md` §9.
+  5. The checker's output (MATCH/no, rule and field names, booleans, the length) contains no values and may be shared. **Never** paste the sample, the token, a hash, a signature, names or ids into the repository, an issue or a chat.
 
 ## 7. Troubleshooting
 

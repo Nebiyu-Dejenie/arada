@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | **Implemented, independently audited and hardened (2026-10-02); awaiting owner review.** Phase 2 is **not complete** until two owner actions are done: the live test-environment sample (A8) and the pre-completion docs re-check (§9). **Not production-ready and not safe for public exposure:** B4 (authentication rate limiting) and the other production gates are open |
+| **Status** | Implementation: **IMPLEMENTED**. Security testing: **VERIFIED** (owner, 2026-10-02). Completion: **BLOCKED** on two final gates (§9): Gate 1, the live sample (A8), and Gate 2, the official docs re-check. **Do not merge into `main` until both pass.** **Not production-ready and not safe for public exposure:** B4 (authentication rate limiting) and the other production gates are open |
 | **Date** | 2026-10-01; audit and hardening 2026-10-02 |
 | **Baseline** | `89bdfd6` (verified Telegram specification; B5 resolved) on top of Phase 1 approved at `4896f60` |
 | **Plan** | `PHASE_2_PLAN.md` (approved), owner decisions D1–D6 |
@@ -182,7 +182,7 @@ There is no JWT and no refresh endpoint (ADR-036).
 
 | Gate | Result |
 |---|---|
-| Full suite | **314 passed, 0 failed** (Phase 1 ended at 214; 311 before the hardening) |
+| Full suite | **321 passed, 0 failed** (2026-10-02, latest commit; Phase 1 ended at 214; 311 before the hardening, 314 after it, plus 7 sample-checker tests) |
 | Coverage | **91%** lines (`--cov=arada`); new modules 87–98% |
 | ruff check + format | clean (backend and `scripts/`) |
 | mypy (strict) | no issues, 124 source files |
@@ -195,7 +195,7 @@ There is no JWT and no refresh endpoint (ADR-036).
 
 **Phase 2 suites:**
 - validator unit 56 (two cases added inside an existing test)
-- sample-checker unit 2
+- sample-checker unit 9 (7 added 2026-10-02)
 - Telegram security 17
 - storefront API and integration 12
 - RLS 36 (was 23)
@@ -253,10 +253,47 @@ There is no JWT and no refresh endpoint (ADR-036).
 | bot replacement keeping sessions | 1 |
 | disabled person allowed to log in | 1 |
 
-## 9. Live test-environment sample and docs re-check
+## 9. Final completion gates (owner directive 2026-10-02)
 
-- **Live sample: NOT DONE (owner action).** It needs a Telegram test-environment account and bot, which this environment does not have, and the sample must never be committed. Run `cd backend && uv run python ../scripts/telegram_sample_check.py` (runbook §6), preferably with an Amharic name containing a space. The checker reports whether Telegram's hash and signature match the A8 reading or an alternative reading. **Until it reports A8 MATCH for both, conformance with Telegram is unverified.**
-- **Official docs re-check: NOT DONE here.** `core.telegram.org` is still denied by this environment's network policy; the proxy answered `403` on 2026-10-01 and again on 2026-10-02. The last check is the owner's B5 verification (`PHASE_2_PLAN.md` §14, page hashes recorded). Re-check from the workstation before accepting Phase 2.
+Phase 2 is **not complete** until both gates pass. Neither can be performed from the agent environment, and **neither is claimed here**.
+
+### Gate 1: live Telegram test-environment sample (A8)
+
+**Status: PENDING (owner action).** The agent environment has no Telegram test-environment account or bot. No sample has been seen, so A8 remains **unconfirmed**.
+
+**Checker preparation (2026-10-02).** The validator is unchanged; only the owner-run tool `scripts/telegram_sample_check.py` was improved, test-first:
+- **Input integrity.** A hidden terminal prompt can silently truncate a long line (1024 bytes on macOS). With the 64-character names Telegram allows, an Amharic sample can exceed that, and the truncation would look like an A8 failure. The new `--init-data-stdin` flag reads the sample from a pipe. The script now prints the received length, which must equal `Telegram.WebApp.initData.length`.
+- **Failure diagnosis without disclosure.** If the strict parse rejects the sample, the checker names the rule that failed: disallowed raw characters (ASCII characters by name, non-ASCII only as a count), invalid escape, non-UTF-8, a duplicate or invalid field name, or a missing `=`. It names protocol field names only, never values. A failure can therefore be reported and investigated without sharing the sample.
+- Tests: `tests/unit/test_telegram_sample_script.py` (9).
+
+**Procedure (runbook §6):**
+1. Use a bot and an account in Telegram's **test** environment only. The account's name should be Amharic and contain a space.
+2. Pipe the raw string: `pbpaste | uv run python ../scripts/telegram_sample_check.py --init-data-stdin` (or the equivalent on Linux).
+3. Check that the printed length equals `initData.length`.
+
+**Pass criterion:** the `A8 (form-decoded, UTF-8)` row shows **HMAC MATCH · Ed25519 MATCH**, the sample coverage shows `user has non-ASCII text: True` and `user has a space: True`, and the verdict is `ACCEPTED` (or `REJECTED (stale)` only because more than an hour passed; the MATCH row is the A8 evidence).
+
+**If it fails:** stop. Do not loosen the validator. The checker's output (MATCH/no per reading, rule names, field names, booleans and the length) contains no values and can be shared to investigate. Any change must be justified by that evidence and must come with a regression test and an ADR-012 update.
+
+**Record (non-sensitive only):** date, Telegram client and platform, environment (test), the checker's verdict lines and the sample-coverage booleans. **Never** record the sample, the token, the hash, the signature, names or ids.
+
+### Gate 2: official documentation re-check
+
+**Status: NOT PERFORMED from the agent environment.** On 2026-10-02, `CONNECT core.telegram.org:443` was refused by the environment's network proxy (HTTP 403), as on 2026-10-01. No substitute source was used: no memory, archive, tutorial, framework code or repository text. **This gate must be performed externally by the owner** and recorded as externally verified.
+
+**Procedure.** Fetch each page over verified TLS (for example `curl -sS --fail <url> | shasum -a 256`, then read the sections) and compare it with the 2026-10-01 record in `PHASE_2_PLAN.md` §14.
+
+| Page | Sections | Confirm unchanged (code that depends on it) |
+|---|---|---|
+| <https://core.telegram.org/bots/webapps> | `#validating-data-received-via-the-mini-app` | Secret key `HMAC_SHA256(key="WebAppData", msg=token)`; `hash` is the hex HMAC of every received field except `hash`, sorted, `key=<value>`, `\n`-separated (`miniapp.hmac_secret_key`, `expected_hash`) |
+| same | `#validating-data-for-third-party-use` | Ed25519 message `<bot_id>:WebAppData\n` plus every field except `hash` and `signature`; base64url `signature`; the test and production key hex values (`miniapp.signed_message`, `decode_signature`, `kernel/config.py:TELEGRAM_KEY_FINGERPRINTS`) |
+| same | `#webappinitdata`, `#webappuser` | `auth_date`, `hash` and `signature` are not optional; `user` is optional; `id` is at most 52 significant bits; `is_bot` appears in `receiver` only; no new field that changes signing (`miniapp.verify`, `parse_user`) |
+| same | `#initializing-mini-apps` | `initDataUnsafe` must not be trusted (AUTH-4) |
+| same | launch-mode sections, `#using-bots-in-the-test-environment`, **`#recent-changes`** | Which launches carry no `initData`; test-environment separation; **any entry after "June 11, 2026, Bot API 10.1" that touches validation** |
+| same, plus <https://core.telegram.org/bots/api> | value encoding | Whether the docs **now state** how values are decoded or encoded (A8). If they do and it differs, Gate 1 must be re-run |
+| <https://core.telegram.org/widgets/login-legacy>, <https://core.telegram.org/bots/telegram-login> | `#checking-authorization`, `#validating-id-tokens` | They are still separate mechanisms from Mini App validation |
+
+**Record:** date and time (UTC), each URL, the sections read, the SHA-256 of the HTML read, any changed behaviour, and whether the implementation remains compliant. A changed page hash alone is not a protocol change; the sections decide.
 
 ## 10. ADR changes
 
@@ -289,7 +326,7 @@ There is no JWT and no refresh endpoint (ADR-036).
 | Authorization integration and credential separation | **Implemented, verified by test** |
 | Audit and correlation | **Implemented, verified by test**; failure metrics are logs only |
 | Database and RLS changes | **Implemented, verified by test** (SQL-level, as the runtime role) |
-| Official docs re-check before completion | **Blocked here** (network policy); owner action. Compare the page hashes with `PHASE_2_PLAN.md` §14 |
+| Official docs re-check before completion (Gate 2) | **Pending: external owner verification.** Not performed here: network policy, 403 on 2026-10-02. Procedure in §9 |
 | Forward-only database invariants (migration 0011) | **Implemented, verified by test** (2026-10-02) |
 | Authentication rate limiting (B4) | **Open: REQUIRED BEFORE PUBLIC EXPOSURE** |
 | Webhooks, deep links, notifications, managed bots, frontend, Redis, payments, Merchant Factory, deployment | **Not implemented** (non-goals) |
