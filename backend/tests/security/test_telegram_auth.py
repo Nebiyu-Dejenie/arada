@@ -188,6 +188,26 @@ def test_production_refuses_the_test_key_and_any_mismatch(settings: Settings) ->
         Settings(**{**settings.model_dump(), "telegram_public_key_hex": production_key})
 
 
+def test_staging_accepts_only_telegrams_published_keys(settings: Settings) -> None:
+    """9. Only development and automated tests may use a throwaway key (there is
+    no Telegram private key to sign test vectors with). Staging, like
+    production, must use a key Telegram publishes, matching its environment."""
+    test_key = "40055058a4ee38156a06562e52eece92a771bcd8346a8c4615cb7376eddf72ec"
+    production_key = "e7bf03a2fa4602af4580703d88dda5bb59f32ed8b02a56c187fe7d34caed242d"
+    base = {**settings.model_dump(), "environment": "staging"}
+    for overrides in (
+        {"telegram_environment": "test", "telegram_public_key_hex": Signer().public_hex},
+        {"telegram_environment": "production", "telegram_public_key_hex": test_key},
+    ):
+        with pytest.raises(ValueError, match="telegram"):
+            Settings(**{**base, **overrides})
+    Settings(**{**base, "telegram_environment": "test", "telegram_public_key_hex": test_key})
+    Settings(
+        **{**base, "telegram_environment": "production", "telegram_public_key_hex": production_key}
+    )
+    Settings(**{**base, "telegram_public_key_hex": None})  # unconfigured: logins fail closed
+
+
 async def test_unknown_host_and_unbound_tenant(
     client: httpx.AsyncClient,
     super_admin: Persona,

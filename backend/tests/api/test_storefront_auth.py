@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import secrets
+import time
 import uuid
 from collections.abc import AsyncIterator
 
@@ -11,11 +12,12 @@ import asyncpg
 import httpx
 import pytest
 
+from arada.kernel.config import Settings
 from arada.kernel.db import Database
 from tests.conftest import PgEnv
 from tests.storefront import Storefront, new_customer, open_storefront, telegram_login
 from tests.support import Persona, audit_rows, enrol_totp, login, make_person
-from tests.telegram_kit import Signer, fake_bot
+from tests.telegram_kit import Signer, encode, fake_bot
 from tests.world import TenantWorld, World, build_tenant
 
 
@@ -140,6 +142,31 @@ async def test_reloads_within_the_window_work_and_stop_when_it_closes(
     assert (await telegram_login(client, a.host, raw)).status_code == 401
     # Fresh initData from the same user is unaffected.
     assert (await telegram_login(client, a.host, a.init_data(telegram_signer))).status_code == 200
+
+
+async def test_replay_rows_outlive_the_freshness_window(
+    client: httpx.AsyncClient,
+    storefronts: tuple[Storefront, Storefront],
+    telegram_signer: Signer,
+    settings: Settings,
+    superuser: asyncpg.Connection,
+) -> None:
+    """A replay row must not be pruned (database clock) while its initData can
+    still pass freshness (application clock), or a pruned row would reopen a
+    fresh reuse window. The margin covers future skew and clock drift."""
+    a, _ = storefronts
+    auth_date = int(time.time()) - 30
+    fields = telegram_signer.fields(bot_id=a.bot_id, bot_token=a.bot_token, auth_date=auth_date)
+    assert (await telegram_login(client, a.host, encode(fields))).status_code == 200
+    expires_at = await superuser.fetchval(
+        "SELECT expires_at FROM control.telegram_init_data_uses "
+        "WHERE tenant_id = $1 AND hash_digest = sha256($2::bytea)",
+        uuid.UUID(a.tenant_id),
+        bytes.fromhex(fields["hash"]),
+    )
+    accepted_until = auth_date + settings.telegram_init_data_max_age_seconds
+    margin = expires_at.timestamp() - accepted_until
+    assert margin >= settings.telegram_init_data_future_skew_seconds + 300
 
 
 async def test_expired_idle_and_disabled_sessions_are_refused(

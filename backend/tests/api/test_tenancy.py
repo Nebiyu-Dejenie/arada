@@ -136,15 +136,23 @@ async def test_tenant_a_admin_manages_tenant_a(
     )
     assert demoted.status_code == 200
 
-    audit = await client.get(f"/v1/t/{slug}/audit-events", headers=admin.headers)
-    assert audit.status_code == 200
-    actions = {e["action"] for e in audit.json()}
+    # Read every page: other suites (e.g. storefront logins) also write to A's trail.
+    events: list[dict[str, str]] = []
+    params: dict[str, str | int] = {"limit": 200}
+    while True:
+        page = await client.get(f"/v1/t/{slug}/audit-events", headers=admin.headers, params=params)
+        assert page.status_code == 200
+        events += page.json()
+        if len(page.json()) < 200:
+            break
+        params["before"] = page.json()[-1]["id"]
+    actions = {e["action"] for e in events}
     assert {
         "tenant.profile_updated",
         "tenant.staff_roles_changed",
         "tenant.invitation_accepted",
     } <= actions
-    assert all(e["tenant_id"] == world.a.id for e in audit.json())
+    assert all(e["tenant_id"] == world.a.id for e in events)
 
 
 async def test_tenant_a_staff_cannot_perform_admin_operations(

@@ -146,7 +146,8 @@ def test_stale_future_and_non_integer_auth_date(signer: Signer, bot: tuple[int, 
     assert reason(future, signer, bot) == "future"
     skewed = signer.init_data(bot_id=bot_id, bot_token=token, auth_date=now + 30)
     assert check(skewed, signer, bot)
-    for bad in ("1.5", "-5", "", "١٢٣", "1e9", " 1"):
+    # Signed but beyond what a timestamp can be (year 10000+): refused, not a crash.
+    for bad in ("1.5", "-5", "", "١٢٣", "1e9", " 1", "253402300800", "999999999999"):
         values = signer.fields(bot_id=bot_id, bot_token=token, extra={"auth_date": bad})
         assert reason(encode(values), signer, bot) == "malformed", bad
 

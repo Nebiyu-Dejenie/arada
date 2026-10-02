@@ -137,6 +137,15 @@ class Settings(BaseSettings):
     def _telegram_key_matches_environment(self) -> Settings:
         """A known Telegram key must belong to the configured environment."""
         known = self.telegram_key_environment
+        # Only development and automated tests may use a throwaway key: Telegram
+        # does not publish a private key, so test vectors need one. Every shared
+        # deployment must use a key Telegram publishes.
+        throwaway_allowed = self.environment in (Environment.DEVELOPMENT, Environment.TEST)
+        if self.telegram_public_key_hex is not None and known is None and not throwaway_allowed:
+            raise ValueError(
+                f"telegram_public_key_hex must be one of Telegram's published keys "
+                f"in the {self.environment} environment"
+            )
         if known is not None and known != self.telegram_environment:
             raise ValueError(
                 f"telegram_public_key_hex is Telegram's {known} key but "

@@ -263,7 +263,10 @@ def verify(
     auth_date_text = fields["auth_date"]
     if not auth_date_text.isascii() or not auth_date_text.isdigit() or len(auth_date_text) > 12:
         raise InitDataRejected("malformed")
-    auth_date = datetime.fromtimestamp(int(auth_date_text), tz=UTC)
+    try:
+        auth_date = datetime.fromtimestamp(int(auth_date_text), tz=UTC)
+    except (OverflowError, OSError, ValueError) as exc:  # beyond year 9999
+        raise InitDataRejected("malformed") from exc
     user = parse_user(fields["user"])
     if auth_date > now + future_skew:
         raise InitDataRejected("future")

@@ -573,6 +573,63 @@ async def test_customer_sessions_bind_to_their_own_tenant_and_customer(
                 await app_conn.execute(statement)
 
 
+async def test_revocation_disabling_and_replay_counts_only_move_forward(
+    app_conn: asyncpg.Connection, world: World, rows: Rows
+) -> None:
+    """Invariants that must survive a bug in the service layer live in the database.
+
+    The runtime role may write ``revoked_at``, ``status`` and ``use_count``, so
+    column grants alone would let a faulty code path resurrect a revoked
+    customer session, reactivate a replaced bot or reset a replay counter.
+    """
+    a = uuid.UUID(world.a.id)
+    async with rolled_back(app_conn):
+        await ctx(app_conn, a)
+        revoked = await app_conn.fetchval(
+            "WITH r AS (UPDATE control.customer_sessions SET revoked_at = now(), "
+            "revoked_reason = 't' WHERE revoked_at IS NULL RETURNING 1) SELECT count(*) FROM r"
+        )
+        assert revoked >= 1
+        for statement in (
+            "UPDATE control.customer_sessions SET revoked_at = NULL",
+            "UPDATE control.customer_sessions SET revoked_reason = NULL",
+            "UPDATE control.customer_sessions SET revoked_at = revoked_at + interval '1 hour'",
+            "UPDATE control.customer_sessions SET revoked_reason = 'other'",
+        ):
+            await app_conn.execute("SAVEPOINT s")
+            with pytest.raises(asyncpg.RestrictViolationError, match="only move forward"):
+                await app_conn.execute(statement)
+            await app_conn.execute("ROLLBACK TO SAVEPOINT s")
+    async with rolled_back(app_conn):
+        await ctx(app_conn, a)
+        await app_conn.execute(
+            "UPDATE control.telegram_bots SET status = 'disabled', disabled_at = now() "
+            "WHERE status = 'active'"
+        )
+        for statement in (
+            "UPDATE control.telegram_bots SET status = 'active', disabled_at = NULL",
+            "UPDATE control.telegram_bots SET disabled_at = disabled_at - interval '1 day'",
+        ):
+            await app_conn.execute("SAVEPOINT s")
+            with pytest.raises(asyncpg.RestrictViolationError, match="only move forward"):
+                await app_conn.execute(statement)
+            await app_conn.execute("ROLLBACK TO SAVEPOINT s")
+    async with rolled_back(app_conn):
+        await ctx(app_conn, a)
+        assert await app_conn.fetchval("SELECT count(*) FROM control.telegram_init_data_uses") >= 1
+        await app_conn.execute(
+            "UPDATE control.telegram_init_data_uses SET use_count = use_count + 1"
+        )
+        for statement in (
+            "UPDATE control.telegram_init_data_uses SET use_count = 1",
+            "UPDATE control.telegram_init_data_uses SET use_count = use_count",
+        ):
+            await app_conn.execute("SAVEPOINT s")
+            with pytest.raises(asyncpg.RestrictViolationError, match="only move forward"):
+                await app_conn.execute(statement)
+            await app_conn.execute("ROLLBACK TO SAVEPOINT s")
+
+
 async def test_replay_rows_can_only_be_deleted_once_expired(
     app_conn: asyncpg.Connection, world: World, rows: Rows
 ) -> None:

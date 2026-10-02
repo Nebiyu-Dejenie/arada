@@ -36,6 +36,10 @@ from arada.kernel.scope import Scope
 from arada.tenancy import service as tenancy
 
 MAX_BOT_ID = 2**53 - 1
+# Replay rows are pruned by the database clock, but freshness is judged by the
+# application clock. A row must outlive every moment its initData could still
+# pass freshness, or pruning would reopen a fresh reuse window.
+REPLAY_PRUNE_MARGIN = timedelta(minutes=5)
 # The docs show the token only by example, so only its shape as an opaque
 # printable credential is checked: no whitespace, bounded length.
 _TOKEN = re.compile(r"[\x21-\x7e]{16,256}")
@@ -209,7 +213,12 @@ async def record_init_data_use(
     """
     digest = hashlib.sha256(init_data_hash).digest()
     window = timedelta(seconds=settings.telegram_init_data_reuse_window_seconds)
-    expires_at = auth_date + timedelta(seconds=settings.telegram_init_data_max_age_seconds)
+    expires_at = (
+        auth_date
+        + timedelta(seconds=settings.telegram_init_data_max_age_seconds)
+        + timedelta(seconds=settings.telegram_init_data_future_skew_seconds)
+        + REPLAY_PRUNE_MARGIN
+    )
     # Opportunistic pruning; RLS confines it to this tenant's expired rows. The
     # database clock is used throughout, because first_used_at is set by it.
     await conn.execute(
