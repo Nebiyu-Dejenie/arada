@@ -49,6 +49,8 @@ The owner authorised implementation on 2026-10-02. A first implementation alread
 | `initDataUnsafe` planted in server code | 1 |
 | part of the bot token logged at registration | 1 |
 
+**Deep audit (2026-10-02, `PHASE_2_DEEP_AUDIT.md`).** A second, code-only audit of `a496061` found one HIGH (conditional) defect, F1, and fixed it test-first. A decoded value containing a line feed made the data-check-string ambiguous, so the holder of genuinely signed data could re-split fields and authenticate as another user, if Telegram ever signs such a value. Before the fix, a forged request got a 200 with a session for the victim; after it, the generic 401. One RBAC test gap was also closed (F2). The rest is LOW or INFORMATIONAL with no code change. Full suite: **325 passed**; security tests: 97.
+
 Each claim below names its evidence. "Test" means an automated test that runs in CI (`uv run pytest`). The important tests were also shown to fail against deliberately broken implementations (§8).
 
 ## 1. Authentication flow (as built)
@@ -182,7 +184,7 @@ There is no JWT and no refresh endpoint (ADR-036).
 
 | Gate | Result |
 |---|---|
-| Full suite | **321 passed, 0 failed** (2026-10-02, latest commit; Phase 1 ended at 214; 311 before the hardening, 314 after it, plus 7 sample-checker tests) |
+| Full suite | **325 passed, 0 failed** (2026-10-02, after the deep audit; Phase 1 ended at 214; 311 before the hardening, 314 after it, 321 with the sample-checker tests, plus 4 deep-audit regression tests) |
 | Coverage | **91%** lines (`--cov=arada`); new modules 87–98% |
 | ruff check + format | clean (backend and `scripts/`) |
 | mypy (strict) | no issues, 124 source files |

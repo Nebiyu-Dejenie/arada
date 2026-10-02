@@ -71,6 +71,7 @@ Evidence and test lists are in `reports/PHASE_2.md`.
 | Customer sessions: opaque, server-side, bound to tenant and customer by FORCE RLS | Implemented | ADR-036; `customers/sessions.py`; `access/customer.py` |
 | Replay window per `initData` (reuse window + use cap; our policy) | Implemented | `bots/service.py:record_init_data_use`; concurrent replay test; prune margin `test_replay_rows_outlive_the_freshness_window` |
 | Forward-only invariants in the database: customer-session revocation, bot disabling, replay counters | Implemented | Migration 0011; `test_revocation_disabling_and_replay_counts_only_move_forward` |
+| Injective parse: a decoded value containing the line-feed separator is refused (deep audit F1) | Implemented | `test_a_value_containing_the_line_feed_separator_is_refused`, `test_a_resplit_signed_string_cannot_impersonate_another_user`; `reports/PHASE_2_DEEP_AUDIT.md` |
 | Generic 401 for every failed Telegram login; reason in logs only | Implemented | D5; `test_every_rejection_is_the_same_generic_401_with_a_logged_reason` |
 | Customer and staff credentials never interchangeable | Implemented | OpenAPI-driven sweep `test_customer_tokens_are_refused_by_every_staff_operation` |
 | Audit: person and customer creation, customer login and logout, bot registration and disabling, with request and trace ids | Implemented | `test_logins_are_audited_inside_the_tenant_with_correlation_ids` |

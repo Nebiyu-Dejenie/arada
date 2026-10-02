@@ -96,5 +96,6 @@ Architecture, implementation, database, migration, authorization, tenant isolati
 - The RLS lint scans every application schema (`APP_SCHEMAS` in `test_rls_coverage.py`); a new schema must be added there. `TENANT_TABLES` uses schema-qualified names.
 - Give the runtime role column-level UPDATE grants that never include `tenant_id`, binding columns, tokens or expiry.
 - A value the runtime role may update but must never roll back (revocation, disabling, counters) gets a forward-only trigger (migration 0011), not just a column grant.
+- Any signed format with a separator must refuse that separator inside values, or the signed bytes have more than one parse (Phase 2 deep audit F1).
 - Unauthenticated endpoints commit no database writes on failure. Failures go to logs, not the audit trail (register B4).
 - Never put real Telegram tokens, raw `initData`, signatures or personal data in the repository. Tests generate throwaway keys and fake tokens (`tests/telegram_kit.py`).
